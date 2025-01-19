@@ -32,6 +32,7 @@ const Home = () => {
             setProjects([...projects, res.data]);
             setProjectName('');
             setIsModalOpen(false);
+            navigate('/project', { state: { project: res.data } });  // Redirect to project page after creating project
         } catch (err) {
             if (err.response && err.response.data) {
                 setError(err.response.data.error);
@@ -43,7 +44,7 @@ const Home = () => {
 
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-gray-900 text-white">
-            <h1 className="text-3xl font-bold mb-6">Welcome, {user?.name}</h1>
+            <h1 className="text-3xl font-bold mb-6">Welcome, {user?.name || 'Guest'}</h1>
             <button
                 onClick={() => setIsModalOpen(true)}
                 className="bg-blue-500 text-white p-2 rounded hover:bg-blue-600 transition duration-200"

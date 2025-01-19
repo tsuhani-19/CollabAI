@@ -5,5 +5,5 @@
   box-sizing: border-box;
 }
 .message-box::-webkit-scrollbar{
-  scrollbar-width: none;
+  scrollbar-behavior: smooth;
 }

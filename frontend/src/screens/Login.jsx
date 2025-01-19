@@ -1,7 +1,7 @@
 import React, { useState, useContext } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { UserContext } from '../context/Usercontext.jsx';  // Ensure consistent casing
+import { useNavigate } from 'react-router-dom';
 import axios from '../config/axios.js';
+import { UserContext } from '../context/Usercontext.jsx';
 
 const Login = () => {
     const [email, setEmail] = useState('');
@@ -13,11 +13,11 @@ const Login = () => {
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
-            const res = await axios.post('/users/login', { email, password });  // Correct URL
+            const res = await axios.post('/users/login', { email, password });
             const { data } = res;
             localStorage.setItem('token', data.token);
             setUser(data.user);
-            navigate('/home');  // Redirect to home page after login
+            navigate('/projects');
         } catch (err) {
             if (err.response && err.response.data) {
                 setError(err.response.data.error);
@@ -64,11 +64,8 @@ const Login = () => {
                     >
                         Login
                     </button>
+                    {error && <p className="text-red-500 mt-4">{error}</p>}
                 </form>
-                {error && <p className="text-red-500 mt-4 text-center">{error}</p>}
-                <p className="mt-4 text-center">
-                    Don't have an account? <Link to="/register" className="text-blue-500 hover:underline">Register</Link>
-                </p>
             </div>
         </div>
     );

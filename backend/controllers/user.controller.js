@@ -3,6 +3,7 @@ import * as userService from '../services/user.service.js';
 import { validationResult } from 'express-validator';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import User from '../models/user.model.js';
 
 export const createUserController = async (req, res) => {
     const errors = validationResult(req);
@@ -141,5 +142,38 @@ export const login = async (req, res) => {
     } catch (err) {
         console.error(err.message);
         res.status(500).send('Server error');
+    }
+};
+
+export const registerUser = async (req, res) => {
+    try {
+        const user = new User(req.body);
+        await user.save();
+        const token = await user.generateAuthToken();
+        res.status(201).json({ user, token });
+    } catch (error) {
+        if (error.code === 11000) {
+            res.status(400).json({ error: 'Email already exists' });
+        } else {
+            res.status(400).json({ error: error.message });
+        }
+    }
+};
+
+export const loginUser = async (req, res) => {
+    try {
+        const { email, password } = req.body;
+        const user = await User.findOne({ email });
+        if (!user) {
+            throw new Error('Unable to login');
+        }
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            throw new Error('Unable to login');
+        }
+        const token = await user.generateAuthToken();
+        res.status(200).json({ user, token });
+    } catch (error) {
+        res.status(400).json({ error: error.message });
     }
 };

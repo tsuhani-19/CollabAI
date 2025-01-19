@@ -1,23 +1,19 @@
-import React, { useState, useContext } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { UserContext } from '../context/Usercontext.jsx';  // Ensure consistent casing
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from '../config/axios.js';
 
 const Register = () => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
-    const { setUser } = useContext(UserContext);
     const navigate = useNavigate();
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
-            const res = await axios.post('/users/register', { email, password });  // Correct URL
-            const { data } = res;
-            localStorage.setItem('token', data.token);
-            setUser(data.user);
-            navigate('/login');  // Redirect to login page after registration
+            const res = await axios.post('/users/register', { email, password });
+            localStorage.setItem('token', res.data.token);
+            navigate('/login');
         } catch (err) {
             if (err.response && err.response.data) {
                 setError(err.response.data.error);
@@ -64,11 +60,8 @@ const Register = () => {
                     >
                         Register
                     </button>
+                    {error && <p className="text-red-500 mt-4">{error}</p>}
                 </form>
-                {error && <p className="text-red-500 mt-4 text-center">{error}</p>}
-                <p className="mt-4 text-center">
-                    Already have an account? <Link to="/login" className="text-blue-500 hover:underline">Login</Link>
-                </p>
             </div>
         </div>
     );

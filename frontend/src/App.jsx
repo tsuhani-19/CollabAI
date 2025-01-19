@@ -3,19 +3,19 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Home from './screens/Home.jsx';
 import Login from './screens/Login.jsx';
 import Register from './screens/Register.jsx';
-import Project from './screens/Project.jsx';  // Import the Project component
-
-import { UserProvider } from "./context/Usercontext.jsx";
+import Project from './screens/Project.jsx';
+import { UserProvider } from './context/Usercontext.jsx';  // Import the UserProvider
 
 const App = () => {
     return (
         <UserProvider>
             <Router>
                 <Routes>
-                    <Route path="/" element={<Home />} />
+                    <Route path="/" element={<Login />} />
                     <Route path="/login" element={<Login />} />
                     <Route path="/register" element={<Register />} />
-                    <Route path="/project" element={<Project />} />  // Define the Project route
+                    <Route path="/home" element={<Home />} />
+                    <Route path="/project" element={<Project />} />
                 </Routes>
             </Router>
         </UserProvider>

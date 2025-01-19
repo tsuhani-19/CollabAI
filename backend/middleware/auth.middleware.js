@@ -1,18 +1,21 @@
 import jwt from 'jsonwebtoken';
+import User from '../models/user.model.js';
 
-const authUser = (req, res, next) => {
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-
-    if (!token) {
-        return res.status(401).json({ msg: 'No token, authorization denied' });
-    }
-
+export const authUser = async (req, res, next) => {
     try {
+        const token = req.header('Authorization').replace('Bearer ', '');
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        req.user = decoded.user;
+        const user = await User.findOne({ _id: decoded._id, 'tokens.token': token });
+
+        if (!user) {
+            throw new Error();
+        }
+
+        req.token = token;
+        req.user = user;
         next();
-    } catch (err) {
-        res.status(401).json({ msg: 'Token is not valid' });
+    } catch (error) {
+        res.status(401).json({ error: 'Please authenticate.' });
     }
 };
 
