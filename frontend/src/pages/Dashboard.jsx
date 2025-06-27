@@ -1,29 +1,61 @@
-// ✅ Integrated Dashboard.jsx with Live Chat + Code Sync + Project Sidebar
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
-import socket from "../socket.js";
+import socket from "../socket";
 import { toast } from "react-toastify";
-import "react-toastify/dist/ReactToastify.css";
+import ChatSection from "./ChatSection";
+import CodeEditorSection from "./CodeEditorSection";
+import api from "../services/api";
+import { useUser } from "../context/UserContext";
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const { user } = useUser();
   const [projects, setProjects] = useState([]);
   const [currentProject, setCurrentProject] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [code, setCode] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
+  
+  const [activeFile, setActiveFile] = useState("App.js");
+  const [output, setOutput] = useState("");
+  const [showOutput, setShowOutput] = useState(false);
+  const [activeModal, setActiveModal] = useState(null);
+  const [projectName, setProjectName] = useState("");
+  const [collaboratorEmail, setCollaboratorEmail] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [files, setFiles] = useState([
+  { name: "App.js", type: "file", content: "" },
+]);
+
+
+  const chatRef = useRef();
 
   useEffect(() => {
     fetchProjects();
-    socket.on("receive-message", (msg) => {
-      setMessages((prev) => [...prev, { text: msg, type: "other" }]);
-    });
-    socket.on("receive-code", (newCode) => {
+
+    const handleReceiveMessage = (msg) => {
+      setMessages((prev) => [...prev, msg]);
+    };
+
+    const handleReceiveCode = (newCode) => {
       setCode(newCode);
-    });
-    return () => socket.disconnect();
+      updateFileContent(activeFile, newCode);
+    };
+
+    socket.on("receive-message", handleReceiveMessage);
+    socket.on("receive-code", handleReceiveCode);
+
+    return () => {
+      socket.off("receive-message", handleReceiveMessage);
+      socket.off("receive-code", handleReceiveCode);
+    };
   }, []);
+
+  useEffect(() => {
+    chatRef.current?.scrollTo(0, chatRef.current.scrollHeight);
+  }, [messages]);
 
   const fetchProjects = async () => {
     const token = localStorage.getItem("token");
@@ -37,106 +69,174 @@ export default function Dashboard() {
     }
   };
 
+  const loadChatHistory = async (projectId) => {
+    try {
+      const res = await axios.get(`http://localhost:5000/api/chat/${projectId}`);
+      setMessages(res.data);
+    } catch (err) {
+      toast.error("Failed to load chat history");
+    }
+  };
+
   const handleLogout = () => {
     localStorage.removeItem("token");
     toast.info("Logged out");
     navigate("/login");
   };
 
-  const handleJoinProject = (project) => {
+  const handleJoinProject = async (project) => {
     setCurrentProject(project);
-    socket.connect();
+    await loadChatHistory(project._id);
+    if (!socket.connected) socket.connect();
     socket.emit("join-room", { projectId: project._id });
     toast.success(`Joined ${project.name}`);
+    setActiveModal(null);
   };
 
-  const sendMessage = () => {
+  const sendMessage = async () => {
     if (!input.trim() || !currentProject) return;
-    socket.emit("send-message", { projectId: currentProject._id, message: input });
-    setMessages((prev) => [...prev, { text: input, type: "self" }]);
+
+    const userMsg = input;
     setInput("");
+
+    const messageData = {
+      projectId: currentProject._id,
+      sender: "user",
+      senderId: user._id,
+      message: userMsg,
+      timestamp: new Date(),
+    };
+
+    socket.emit("send-message", messageData); // only emit
+    try {
+      await axios.post("http://localhost:5000/api/chat", messageData);
+    } catch (err) {
+      console.error("Error saving message:", err);
+    }
+
+    if (userMsg.startsWith("@ai")) {
+      const prompt = userMsg.replace("@ai", "").trim();
+      if (!prompt) return toast.warn("Please write something after @ai");
+
+      setIsLoading(true);
+      setMessages((prev) => [
+        ...prev,
+        {
+          sender: "loading",
+          message: "🤖 AI is typing...",
+          timestamp: new Date(),
+        },
+      ]);
+
+      try {
+        const res = await axios.post("http://localhost:5000/api/ai/reply", { prompt });
+        const aiMessage = {
+          projectId: currentProject._id,
+          sender: "ai",
+          senderId: "ai-bot",
+          message: `🤖 ${res.data.reply}`,
+          timestamp: new Date(),
+        };
+
+        socket.emit("send-message", aiMessage);
+        await axios.post("http://localhost:5000/api/chat", aiMessage);
+      } catch (err) {
+        toast.error("AI couldn't respond.");
+      } finally {
+        setMessages((prev) => prev.filter((msg) => msg.sender !== "loading"));
+        setIsLoading(false);
+      }
+    }
+  };
+
+  const updateFileContent = (fileName, newContent) => {
+    setFiles((prev) =>
+      prev.map((f) => (f.name === fileName ? { ...f, content: newContent } : f))
+    );
   };
 
   const handleCodeChange = (e) => {
     const newCode = e.target.value;
     setCode(newCode);
+    updateFileContent(activeFile, newCode);
+
     if (currentProject) {
       socket.emit("code-change", { projectId: currentProject._id, code: newCode });
     }
   };
 
+  const handleRunCode = () => {
+    try {
+      const result = eval(code);
+      setOutput(String(result));
+    } catch (err) {
+      setOutput("Error: " + err.message);
+    }
+    setShowOutput(true);
+  };
+
+  const toggleModal = (type) => {
+    setActiveModal((prev) => (prev === type ? null : type));
+  };
+
+  const handleCreateProject = async (e) => {
+    e.preventDefault();
+    if (!projectName || !collaboratorEmail) {
+      toast.error("Please fill all fields");
+      return;
+    }
+    try {
+      await api.post("/project/create", {
+        name: projectName,
+        collaboratorEmail,
+      });
+      toast.success("Project created successfully");
+      fetchProjects();
+      setActiveModal(null);
+      setProjectName("");
+      setCollaboratorEmail("");
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Error creating project");
+    }
+  };
+
   return (
-    <div className="flex h-screen bg-[#0d0d1a] text-white">
-      {/* Sidebar */}
-      <div className="w-64 bg-[#1a1a2e] p-6 flex flex-col justify-between">
-        <div>
-          <h2 className="text-2xl font-bold mb-8">CollabAI</h2>
-          <nav className="space-y-4">
-            {projects.map((p) => (
-              <button
-                key={p._id}
-                onClick={() => handleJoinProject(p)}
-                className={`block w-full text-left rounded px-2 py-1 ${
-                  currentProject?._id === p._id
-                    ? "bg-indigo-600 text-white"
-                    : "text-gray-300 hover:bg-[#2a2a40]"
-                }`}
-              >
-                {p.name}
-              </button>
-            ))}
-          </nav>
-        </div>
-        <button
-          onClick={handleLogout}
-          className="bg-red-500 hover:bg-red-600 text-white py-2 rounded"
-        >
-          Logout
-        </button>
-      </div>
+    <div className="flex h-screen bg-[#111827] text-white font-sans">
+      <ChatSection
+        menuOpen={menuOpen}
+        setMenuOpen={setMenuOpen}
+        toggleModal={toggleModal}
+        activeModal={activeModal}
+        setActiveModal={setActiveModal}
+        handleLogout={handleLogout}
+        projects={projects}
+        handleJoinProject={handleJoinProject}
+        projectName={projectName}
+        setProjectName={setProjectName}
+        collaboratorEmail={collaboratorEmail}
+        setCollaboratorEmail={setCollaboratorEmail}
+        handleCreateProject={handleCreateProject}
+        messages={messages}
+        chatRef={chatRef}
+        input={input}
+        setInput={setInput}
+        sendMessage={sendMessage}
+        isLoading={isLoading}
+      />
 
-      {/* Main Content */}
-      <div className="flex flex-1">
-        {/* Chat Panel */}
-        <div className="w-1/3 border-r border-[#2c2c3e] p-4 flex flex-col">
-          <h3 className="text-lg font-semibold mb-4">Live Chat</h3>
-          <div className="flex-1 overflow-y-auto space-y-2 text-sm">
-            {messages.map((msg, i) => (
-              <p
-                key={i}
-                className={`p-2 rounded ${
-                  msg.type === "self"
-                    ? "bg-blue-500 self-end text-right"
-                    : "bg-[#2a2a40]"
-                }`}
-              >
-                {msg.text}
-              </p>
-            ))}
-          </div>
-          <div className="mt-4">
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              type="text"
-              placeholder="Type a message..."
-              className="w-full p-2 rounded bg-[#1a1a2e] border border-[#333] text-white"
-              onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-            />
-          </div>
-        </div>
-
-        {/* Code Editor */}
-        <div className="flex-1 p-4">
-          <h3 className="text-lg font-semibold mb-4">Code Editor</h3>
-          <textarea
-            value={code}
-            onChange={handleCodeChange}
-            placeholder="Start coding..."
-            className="w-full h-full bg-[#1f1f30] text-white p-4 rounded border border-[#333] resize-none"
-          ></textarea>
-        </div>
-      </div>
+      <CodeEditorSection
+        files={files}
+        setFiles={setFiles} 
+        activeFile={activeFile}
+        setActiveFile={setActiveFile}
+        code={code}
+        setCode={setCode}
+        handleCodeChange={handleCodeChange}
+        handleRunCode={handleRunCode}
+        output={output}
+        showOutput={showOutput}
+        setShowOutput={setShowOutput}
+      />
     </div>
   );
 }
