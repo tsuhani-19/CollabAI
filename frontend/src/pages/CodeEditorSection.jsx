@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 import { FaPlay, FaFolder, FaFile, FaPlus } from "react-icons/fa";
 
 export default function CodeEditorSection({
@@ -13,16 +13,22 @@ export default function CodeEditorSection({
   output,
   showOutput,
   setShowOutput,
+  socket,
+  currentProjectId,
 }) {
-  const [explorerItems, setExplorerItems] = useState(files); // [{ name, type: 'file'|'folder', content? }]
+  // ✅ Handles selecting file
+  const handleSelectFile = (file) => {
+    setActiveFile(file.name);
+    setCode(file.content || "");
+  };
 
-  const handleAddItem = () => {
-    const name = prompt("Enter name (e.g., App.js or utils):");
+  // ✅ Handle adding file/folder
+  const handleAddItemToFiles = () => {
+    const name = prompt("Enter file or folder name (e.g. App.js or utils):");
     if (!name) return;
 
     const isFolder = !name.includes(".");
-
-    const exists = explorerItems.some((item) => item.name === name);
+    const exists = files.some((item) => item.name === name);
     if (exists) return alert("Item already exists");
 
     const newItem = {
@@ -31,26 +37,26 @@ export default function CodeEditorSection({
       content: isFolder ? null : "",
     };
 
-    const updatedItems = [...explorerItems, newItem];
-    setExplorerItems(updatedItems);
-    setFiles(updatedItems);
+    const updatedFiles = [...files, newItem];
+    setFiles(updatedFiles);
 
+    // ✅ Sync with backend (and collaborators)
+    if (currentProjectId && socket) {
+      socket.emit("sync-files", { projectId: currentProjectId, files: updatedFiles });
+    }
+
+    // ✅ Auto-select new file for editing
     if (newItem.type === "file") {
       setActiveFile(name);
       setCode("");
     }
   };
 
-  const handleSelectFile = (file) => {
-    setActiveFile(file.name);
-    setCode(file.content);
-  };
-
   return (
     <div className="w-3/4 flex flex-col relative">
       {/* File Tabs */}
       <div className="flex items-center bg-[#1a1a2e] p-2 space-x-2 border-b border-[#2c2c3e]">
-        {explorerItems
+        {files
           .filter((item) => item.type === "file")
           .map((file) => (
             <div
@@ -66,14 +72,14 @@ export default function CodeEditorSection({
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Explorer Sidebar */}
+        {/* File Explorer */}
         <div className="w-1/5 bg-[#121222] p-4 border-r border-[#2c2c3e]">
           <div className="flex justify-between items-center mb-3">
             <h4 className="text-sm font-semibold flex items-center gap-1">
               <FaFolder /> Explorer
             </h4>
             <button
-              onClick={handleAddItem}
+              onClick={handleAddItemToFiles}
               className="text-green-400 hover:text-green-300 text-sm"
               title="Add File/Folder"
             >
@@ -82,7 +88,7 @@ export default function CodeEditorSection({
           </div>
 
           <ul className="space-y-1 text-sm">
-            {explorerItems.map((item) => (
+            {files.map((item) => (
               <li
                 key={item.name}
                 className={`flex items-center gap-2 cursor-pointer hover:text-indigo-400 ${

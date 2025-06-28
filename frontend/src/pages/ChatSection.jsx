@@ -1,7 +1,7 @@
 import React from "react";
 import { toast } from "react-toastify";
 import { FaBars } from "react-icons/fa";
-import { useUser } from "../context/UserContext"; // ✅ if needed for senderId check
+import { useUser } from "../context/UserContext";
 
 export default function ChatSection({
   menuOpen,
@@ -24,7 +24,18 @@ export default function ChatSection({
   sendMessage,
   isLoading,
 }) {
-  const { user } = useUser(); // ✅
+  const { user } = useUser();
+
+  // Helper: Deduplicate users by _id
+  const getUniqueUsers = (users) => {
+    const map = new Map();
+    users.forEach((u) => {
+      if (u && u._id) {
+        map.set(u._id, u);
+      }
+    });
+    return Array.from(map.values());
+  };
 
   return (
     <div className="w-1/4 bg-[#1a1a2e] flex flex-col border-r border-[#2c2c3e]">
@@ -36,7 +47,7 @@ export default function ChatSection({
         <h2 className="text-lg font-bold">CollabAI</h2>
       </div>
 
-      {/* Menu options */}
+      {/* Menu */}
       {menuOpen && (
         <div className="p-4 space-y-2 text-sm border-b border-[#333] bg-[#1f2937]">
           <button onClick={() => toggleModal("addCollaborator")} className="block w-full text-left hover:text-indigo-400">Add Collaborators</button>
@@ -46,7 +57,7 @@ export default function ChatSection({
         </div>
       )}
 
-      {/* Modal content */}
+      {/* Modal Content */}
       <div className="p-4 flex-1 overflow-y-auto">
         {/* Projects Modal */}
         {activeModal === "projects" && (
@@ -63,7 +74,7 @@ export default function ChatSection({
                   <li key={project._id} className="bg-[#121222] p-3 rounded border border-[#444]">
                     <p className="text-indigo-400 font-semibold">{project.name}</p>
                     <ul className="ml-4 mt-1 list-disc text-gray-400 text-sm">
-                      {project.users.map((u) => (
+                      {getUniqueUsers(project.users).map((u) => (
                         <li key={u._id}>{u.name} ({u.email})</li>
                       ))}
                     </ul>
@@ -126,10 +137,13 @@ export default function ChatSection({
         {/* Chat Messages */}
         <div className="space-y-2 mt-4 overflow-y-auto max-h-80" ref={chatRef}>
           {messages.map((msg, i) => {
-            const isSelf = msg.sender === "user" && msg.senderId === user._id;
+            const isSelf = msg.sender === "user" && msg.senderId === user?._id;
 
             return (
-              <div key={i} className={`flex mb-2 ${isSelf ? "justify-end" : "justify-start"}`}>
+              <div
+                key={`${msg?.sender}-${msg?.timestamp}-${i}`}
+                className={`flex mb-2 ${isSelf ? "justify-end" : "justify-start"}`}
+              >
                 <div
                   className={`p-3 rounded-lg max-w-[70%] text-sm ${
                     msg.sender === "ai"

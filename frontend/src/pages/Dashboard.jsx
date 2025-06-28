@@ -11,84 +11,95 @@ import { useUser } from "../context/UserContext";
 export default function Dashboard() {
   const navigate = useNavigate();
   const { user } = useUser();
+
   const [projects, setProjects] = useState([]);
   const [currentProject, setCurrentProject] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [code, setCode] = useState("");
-  const [menuOpen, setMenuOpen] = useState(false);
-  
+  const [files, setFiles] = useState([{ name: "App.js", type: "file", content: "" }]);
   const [activeFile, setActiveFile] = useState("App.js");
   const [output, setOutput] = useState("");
   const [showOutput, setShowOutput] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [activeModal, setActiveModal] = useState(null);
   const [projectName, setProjectName] = useState("");
   const [collaboratorEmail, setCollaboratorEmail] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [files, setFiles] = useState([
-  { name: "App.js", type: "file", content: "" },
-]);
-
 
   const chatRef = useRef();
+  const token = localStorage.getItem("token");
 
   useEffect(() => {
     fetchProjects();
 
-    const handleReceiveMessage = (msg) => {
+    socket.on("receive-message", (msg) => {
       setMessages((prev) => [...prev, msg]);
-    };
+    });
 
-    const handleReceiveCode = (newCode) => {
+    socket.on("receive-code", (newCode) => {
       setCode(newCode);
       updateFileContent(activeFile, newCode);
-    };
+    });
 
-    socket.on("receive-message", handleReceiveMessage);
-    socket.on("receive-code", handleReceiveCode);
+    socket.on("sync-files", (incomingFiles) => {
+      setFiles(incomingFiles);
+    });
 
     return () => {
-      socket.off("receive-message", handleReceiveMessage);
-      socket.off("receive-code", handleReceiveCode);
+      socket.off("receive-message");
+      socket.off("receive-code");
+      socket.off("sync-files");
     };
-  }, []);
+  }, [activeFile]);
 
   useEffect(() => {
     chatRef.current?.scrollTo(0, chatRef.current.scrollHeight);
   }, [messages]);
 
   const fetchProjects = async () => {
-    const token = localStorage.getItem("token");
     try {
       const res = await axios.get("http://localhost:5000/api/project/my-projects", {
         headers: { Authorization: `Bearer ${token}` },
       });
       setProjects(res.data);
-    } catch (err) {
+    } catch {
       toast.error("Failed to fetch projects");
     }
   };
 
   const loadChatHistory = async (projectId) => {
     try {
-      const res = await axios.get(`http://localhost:5000/api/chat/${projectId}`);
+      const res = await axios.get(`http://localhost:5000/api/chat/${projectId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       setMessages(res.data);
-    } catch (err) {
+    } catch {
       toast.error("Failed to load chat history");
     }
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    toast.info("Logged out");
-    navigate("/login");
   };
 
   const handleJoinProject = async (project) => {
     setCurrentProject(project);
     await loadChatHistory(project._id);
+
+    try {
+      const res = await axios.get(`http://localhost:5000/api/project/${project._id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const savedCode = res.data.code || "";
+      const savedFiles = res.data.files || [];
+      setCode(savedCode);
+      setFiles(savedFiles);
+      updateFileContent(activeFile, savedCode);
+    } catch {
+      toast.error("Failed to load saved code");
+    }
+
     if (!socket.connected) socket.connect();
-    socket.emit("join-room", { projectId: project._id });
+    socket.emit("join-room", { projectId: project._id, userId: user._id });
+    socket.emit("sync-files", { projectId: project._id, files });
+
     toast.success(`Joined ${project.name}`);
     setActiveModal(null);
   };
@@ -107,9 +118,11 @@ export default function Dashboard() {
       timestamp: new Date(),
     };
 
-    socket.emit("send-message", messageData); // only emit
+    socket.emit("send-message", messageData);
     try {
-      await axios.post("http://localhost:5000/api/chat", messageData);
+      await axios.post("http://localhost:5000/api/chat", messageData, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
     } catch (err) {
       console.error("Error saving message:", err);
     }
@@ -129,7 +142,14 @@ export default function Dashboard() {
       ]);
 
       try {
-        const res = await axios.post("http://localhost:5000/api/ai/reply", { prompt });
+        const res = await axios.post(
+          "http://localhost:5000/api/ai/reply",
+          { prompt },
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+
         const aiMessage = {
           projectId: currentProject._id,
           sender: "ai",
@@ -139,20 +159,16 @@ export default function Dashboard() {
         };
 
         socket.emit("send-message", aiMessage);
-        await axios.post("http://localhost:5000/api/chat", aiMessage);
-      } catch (err) {
+        await axios.post("http://localhost:5000/api/chat", aiMessage, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } catch {
         toast.error("AI couldn't respond.");
       } finally {
         setMessages((prev) => prev.filter((msg) => msg.sender !== "loading"));
         setIsLoading(false);
       }
     }
-  };
-
-  const updateFileContent = (fileName, newContent) => {
-    setFiles((prev) =>
-      prev.map((f) => (f.name === fileName ? { ...f, content: newContent } : f))
-    );
   };
 
   const handleCodeChange = (e) => {
@@ -162,6 +178,40 @@ export default function Dashboard() {
 
     if (currentProject) {
       socket.emit("code-change", { projectId: currentProject._id, code: newCode });
+      socket.emit("sync-files", { projectId: currentProject._id, files });
+    }
+  };
+
+  const updateFileContent = (fileName, newContent) => {
+    setFiles((prev) =>
+      prev.map((f) => (f.name === fileName ? { ...f, content: newContent } : f))
+    );
+  };
+
+  const handleAddItemToFiles = () => {
+    const name = prompt("Enter file or folder name (e.g., App.js or utils):");
+    if (!name) return;
+
+    const isFolder = !name.includes(".");
+    const exists = files.some((f) => f.name === name);
+    if (exists) return toast.warn("File/folder already exists");
+
+    const newItem = {
+      name,
+      type: isFolder ? "folder" : "file",
+      content: isFolder ? null : "",
+    };
+
+    const updated = [...files, newItem];
+    setFiles(updated);
+
+    if (currentProject) {
+      socket.emit("sync-files", { projectId: currentProject._id, files: updated });
+    }
+
+    if (newItem.type === "file") {
+      setActiveFile(name);
+      setCode("");
     }
   };
 
@@ -175,6 +225,12 @@ export default function Dashboard() {
     setShowOutput(true);
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    toast.info("Logged out");
+    navigate("/login");
+  };
+
   const toggleModal = (type) => {
     setActiveModal((prev) => (prev === type ? null : type));
   };
@@ -186,10 +242,16 @@ export default function Dashboard() {
       return;
     }
     try {
-      await api.post("/project/create", {
-        name: projectName,
-        collaboratorEmail,
-      });
+      await api.post(
+        "/project/create",
+        {
+          name: projectName,
+          collaboratorEmail,
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
       toast.success("Project created successfully");
       fetchProjects();
       setActiveModal(null);
@@ -226,16 +288,19 @@ export default function Dashboard() {
 
       <CodeEditorSection
         files={files}
-        setFiles={setFiles} 
+        setFiles={setFiles}
         activeFile={activeFile}
         setActiveFile={setActiveFile}
-        code={code}
         setCode={setCode}
+        code={code}
         handleCodeChange={handleCodeChange}
         handleRunCode={handleRunCode}
         output={output}
         showOutput={showOutput}
         setShowOutput={setShowOutput}
+        socket={socket}
+        currentProjectId={currentProject?._id}
+        handleAddItemToFiles={handleAddItemToFiles}
       />
     </div>
   );
