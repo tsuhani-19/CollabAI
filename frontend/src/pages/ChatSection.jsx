@@ -26,13 +26,10 @@ export default function ChatSection({
 }) {
   const { user } = useUser();
 
-  // Helper: Deduplicate users by _id
   const getUniqueUsers = (users) => {
     const map = new Map();
     users.forEach((u) => {
-      if (u && u._id) {
-        map.set(u._id, u);
-      }
+      if (u && u._id) map.set(u._id, u);
     });
     return Array.from(map.values());
   };
@@ -47,7 +44,7 @@ export default function ChatSection({
         <h2 className="text-lg font-bold">CollabAI</h2>
       </div>
 
-      {/* Menu */}
+      {/* Sidebar Menu */}
       {menuOpen && (
         <div className="p-4 space-y-2 text-sm border-b border-[#333] bg-[#1f2937]">
           <button onClick={() => toggleModal("addCollaborator")} className="block w-full text-left hover:text-indigo-400">Add Collaborators</button>
@@ -57,9 +54,8 @@ export default function ChatSection({
         </div>
       )}
 
-      {/* Modal Content */}
+      {/* Modal: Projects */}
       <div className="p-4 flex-1 overflow-y-auto">
-        {/* Projects Modal */}
         {activeModal === "projects" && (
           <div className="bg-[#1f2937] p-4 rounded-lg border border-[#333]">
             <div className="flex justify-between items-center mb-3">
@@ -91,7 +87,7 @@ export default function ChatSection({
           </div>
         )}
 
-        {/* Create Project Modal */}
+        {/* Modal: New Project */}
         {activeModal === "newProject" && (
           <div className="bg-[#1f2937] p-4 rounded-lg border border-[#333]">
             <div className="flex justify-between items-center mb-3">
@@ -123,7 +119,7 @@ export default function ChatSection({
           </div>
         )}
 
-        {/* Add Collaborator Modal */}
+        {/* Modal: Add Collaborator */}
         {activeModal === "addCollaborator" && (
           <div className="bg-[#1f2937] p-4 rounded-lg border border-[#333]">
             <div className="flex justify-between items-center mb-3">
@@ -140,10 +136,7 @@ export default function ChatSection({
             const isSelf = msg.sender === "user" && msg.senderId === user?._id;
 
             return (
-              <div
-                key={`${msg?.sender}-${msg?.timestamp}-${i}`}
-                className={`flex mb-2 ${isSelf ? "justify-end" : "justify-start"}`}
-              >
+              <div key={`${msg.sender}-${msg.timestamp}-${i}`} className={`flex ${isSelf ? "justify-end" : "justify-start"}`}>
                 <div
                   className={`p-3 rounded-lg max-w-[70%] text-sm ${
                     msg.sender === "ai"
@@ -155,7 +148,7 @@ export default function ChatSection({
                       : "bg-[#2a2a40] text-white"
                   }`}
                 >
-                  {msg.message || msg.text}
+                  {msg.message}
                 </div>
               </div>
             );
@@ -163,7 +156,7 @@ export default function ChatSection({
         </div>
       </div>
 
-      {/* Chat Input */}
+      {/* Input */}
       <div className="p-4 border-t border-[#333]">
         <div className="flex gap-2">
           <input

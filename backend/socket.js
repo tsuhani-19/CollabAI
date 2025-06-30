@@ -5,7 +5,7 @@ const Project = require("./models/Project");
 function setupSocket(server) {
   const io = new Server(server, {
     cors: {
-      origin: "http://localhost:5173", // Change in production
+      origin: "http://localhost:5173", // 🛑 Change this in production
       methods: ["GET", "POST"],
     },
   });
@@ -13,8 +13,9 @@ function setupSocket(server) {
   io.on("connection", (socket) => {
     console.log("🔌 Socket connected:", socket.id);
 
-    // ✅ Join a project room
+    // 🔹 Join a project room
     socket.on("join-room", ({ projectId, userId }) => {
+      if (!projectId || !userId) return;
       socket.join(projectId);
       socket.projectId = projectId;
       socket.userId = userId;
@@ -23,8 +24,10 @@ function setupSocket(server) {
       console.log(`📁 ${socket.id} joined room: ${projectId}`);
     });
 
-    // ✅ Handle chat messages
+    // 💬 Handle sending a chat message
     socket.on("send-message", async ({ projectId, sender = "user", senderId, message }) => {
+      if (!projectId || !message) return;
+
       try {
         const chat = new Chat({
           projectId,
@@ -32,23 +35,29 @@ function setupSocket(server) {
           senderId: sender === "user" ? senderId : null,
           message,
         });
+
         await chat.save();
 
         const msgPayload = {
-          sender,
+          _id: chat._id,
+          projectId: chat.projectId,
+          sender: chat.sender,
           senderId: chat.senderId,
-          message,
+          message: chat.message,
           timestamp: chat.timestamp,
         };
 
         io.to(projectId).emit("receive-message", msgPayload);
+        console.log("📨 Message broadcasted:", msgPayload.message);
       } catch (err) {
         console.error("❌ Error saving chat:", err.message);
       }
     });
 
-    // ✅ Code collaboration
+    // 🔧 Code collaboration sync
     socket.on("code-change", async ({ projectId, code }) => {
+      if (!projectId) return;
+
       try {
         await Project.findByIdAndUpdate(projectId, { code });
       } catch (err) {
@@ -58,8 +67,10 @@ function setupSocket(server) {
       socket.to(projectId).emit("receive-code", code);
     });
 
-    // ✅ Sync entire file/folder structure
+    // 🔁 Sync files/folders
     socket.on("sync-files", async ({ projectId, files }) => {
+      if (!projectId) return;
+
       try {
         await Project.findByIdAndUpdate(projectId, { files });
         socket.to(projectId).emit("sync-files", files);
@@ -68,11 +79,11 @@ function setupSocket(server) {
       }
     });
 
-    // ✅ Update a single file by ID (optional, recommended)
+    // ✏️ Optional: Update a single file
     socket.on("update-file", async ({ projectId, fileId, newContent }) => {
       try {
         const project = await Project.findById(projectId);
-        if (!project) return;
+        if (!project || !project.files) return;
 
         const updateFile = (files) => {
           for (let file of files) {
@@ -80,23 +91,23 @@ function setupSocket(server) {
               file.content = newContent;
               return true;
             }
-            if (file.type === "folder" && file.children?.length) {
+            if (file.type === "folder" && Array.isArray(file.children)) {
               if (updateFile(file.children)) return true;
             }
           }
           return false;
         };
 
-        updateFile(project.files);
-        await project.save();
-
-        socket.to(projectId).emit("file-updated", { fileId, newContent });
+        if (updateFile(project.files)) {
+          await project.save();
+          socket.to(projectId).emit("file-updated", { fileId, newContent });
+        }
       } catch (err) {
         console.error("❌ Error updating file:", err.message);
       }
     });
 
-    // ✅ Notify on disconnect
+    // ❌ Handle disconnects
     socket.on("disconnect", () => {
       if (socket.projectId && socket.userId) {
         socket.to(socket.projectId).emit("user-left", { userId: socket.userId });

@@ -8,6 +8,7 @@ const authRoutes = require("./routes/authRoutes.js");
 const projectRoutes = require("./routes/projectRoutes.js");
 const setupSocket = require("./socket.js");
 const chatRoutes = require("./routes/chatRoutes.js");
+const runRoute = require("./routes/runRoutes.js");
 
 const app = express();
 const server = http.createServer(app);
@@ -29,6 +30,8 @@ app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/project", projectRoutes);
 app.use("/api/chat", chatRoutes);
+app.use("/api/run", runRoute);
+
 
 // Dynamically load aiRoutes (to support ES module syntax)
 (async () => {

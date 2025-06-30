@@ -15,14 +15,13 @@ export default function CodeEditorSection({
   setShowOutput,
   socket,
   currentProjectId,
+  executionStatus,
 }) {
-  // ✅ Handles selecting file
   const handleSelectFile = (file) => {
     setActiveFile(file.name);
     setCode(file.content || "");
   };
 
-  // ✅ Handle adding file/folder
   const handleAddItemToFiles = () => {
     const name = prompt("Enter file or folder name (e.g. App.js or utils):");
     if (!name) return;
@@ -40,12 +39,10 @@ export default function CodeEditorSection({
     const updatedFiles = [...files, newItem];
     setFiles(updatedFiles);
 
-    // ✅ Sync with backend (and collaborators)
     if (currentProjectId && socket) {
       socket.emit("sync-files", { projectId: currentProjectId, files: updatedFiles });
     }
 
-    // ✅ Auto-select new file for editing
     if (newItem.type === "file") {
       setActiveFile(name);
       setCode("");
@@ -111,12 +108,15 @@ export default function CodeEditorSection({
             value={code}
             onChange={handleCodeChange}
             placeholder="Start coding..."
-            className="w-full flex-1 bg-[#0f172a] text-white p-4 rounded border border-[#333] resize-none"
+            className="w-full flex-1 bg-[#0f172a] text-white p-4 rounded border border-[#333] resize-none font-mono text-sm"
           />
           <div className="flex justify-end mt-4">
             <button
-              onClick={handleRunCode}
-              className="bg-green-600 hover:bg-green-700 px-5 py-2 rounded-xl flex items-center gap-2 shadow"
+              onClick={() => {
+                handleRunCode();
+                setShowOutput(true);
+              }}
+              className="bg-green-600 hover:bg-green-700 px-5 py-2 rounded-xl flex items-center gap-2 shadow text-white"
             >
               <FaPlay /> Run
             </button>
@@ -124,19 +124,30 @@ export default function CodeEditorSection({
         </div>
       </div>
 
-      {/* Output */}
+      {/* VSCode-like Terminal Output */}
       {showOutput && (
-        <div className="absolute bottom-10 right-10 bg-[#1a1a2e] text-white border border-[#444] p-4 rounded-xl shadow-lg z-50 w-80">
-          <div className="flex justify-between items-center mb-2">
-            <h4 className="text-md font-semibold">Output</h4>
+        <div className="absolute bottom-0 left-0 w-full bg-[#0f172a] text-white border-t border-[#333] max-h-64 overflow-y-auto shadow-inner z-50">
+          <div className="flex items-center justify-between px-4 py-2 border-b border-[#222] bg-[#1e1e2f]">
+            <h4 className="text-sm font-semibold">Terminal</h4>
+            <span
+              className={`text-xs px-2 py-1 rounded ${
+                executionStatus?.description === "Accepted"
+                  ? "bg-green-700 text-green-300"
+                  : "bg-red-700 text-red-300"
+              }`}
+            >
+              {executionStatus?.description || "Running..."}
+            </span>
             <button
               onClick={() => setShowOutput(false)}
-              className="text-sm text-red-400 hover:text-red-600"
+              className="text-red-400 hover:text-red-500 text-sm"
             >
               ✕
             </button>
           </div>
-          <pre className="text-sm text-gray-300 whitespace-pre-wrap">{output}</pre>
+          <pre className="px-4 py-3 text-sm font-mono whitespace-pre-wrap text-green-300">
+            {output || "Waiting for output..."}
+          </pre>
         </div>
       )}
     </div>
