@@ -10,23 +10,40 @@ exports.getChatsByProject = async (req, res) => {
   }
 };
 
+
+
 exports.createChatMessageAPI = async (req, res) => {
   const { projectId, sender, senderId, message } = req.body;
-  if (!projectId || !message) {
+
+  if (!projectId || !message || !sender) {
     return res.status(400).json({ message: "Missing fields" });
   }
 
   try {
+    let name = "";
+
+    if (sender === "user") {
+      const user = await User.findById(req.user._id).select("name");
+      if (!user) return res.status(404).json({ message: "User not found" });
+      name = user.name;
+    } else {
+      name = "AI";
+    }
+
     const newMessage = new Chat({
       projectId,
       sender,
-      senderId: sender === "user" ? req.user._id : null, // safest
+      senderId: sender === "user" ? req.user._id : null,
+      senderName: name,
       message,
       timestamp: new Date(),
     });
+
     await newMessage.save();
     res.status(201).json(newMessage);
   } catch (err) {
+    console.error("Chat Error:", err);
     res.status(500).json({ message: "Failed to send message" });
   }
 };
+

@@ -1,12 +1,11 @@
 import React from "react";
 import { toast } from "react-toastify";
-import { FaBars } from "react-icons/fa";
+import { FaBars, FaPlus } from "react-icons/fa";
 import { useUser } from "../context/UserContext";
 
 export default function ChatSection({
   menuOpen,
   setMenuOpen,
-  toggleModal,
   activeModal,
   setActiveModal,
   handleLogout,
@@ -17,6 +16,7 @@ export default function ChatSection({
   collaboratorEmail,
   setCollaboratorEmail,
   handleCreateProject,
+  handleAddCollaborator, // ✅ you must pass this handler from parent
   messages,
   chatRef,
   input,
@@ -34,6 +34,13 @@ export default function ChatSection({
     return Array.from(map.values());
   };
 
+  const handleAddCollabPrompt = async (projectId) => {
+    const email = prompt("Enter collaborator's email:");
+    if (email && projectId) {
+      await handleAddCollaborator(projectId, email);
+    }
+  };
+
   return (
     <div className="w-1/4 bg-[#1a1a2e] flex flex-col border-r border-[#2c2c3e]">
       {/* Header */}
@@ -47,14 +54,19 @@ export default function ChatSection({
       {/* Sidebar Menu */}
       {menuOpen && (
         <div className="p-4 space-y-2 text-sm border-b border-[#333] bg-[#1f2937]">
-          <button onClick={() => toggleModal("addCollaborator")} className="block w-full text-left hover:text-indigo-400">Add Collaborators</button>
-          <button onClick={() => toggleModal("newProject")} className="block w-full text-left hover:text-indigo-400">New Project</button>
-          <button onClick={() => toggleModal("projects")} className="block w-full text-left hover:text-indigo-400">My Projects</button>
-          <button onClick={handleLogout} className="block w-full text-left text-red-400 hover:text-red-600">Logout</button>
+          <button onClick={() => setActiveModal("newProject")} className="block w-full text-left hover:text-indigo-400">
+            New Project
+          </button>
+          <button onClick={() => setActiveModal("projects")} className="block w-full text-left hover:text-indigo-400">
+            My Projects
+          </button>
+          <button onClick={handleLogout} className="block w-full text-left text-red-400 hover:text-red-600">
+            Logout
+          </button>
         </div>
       )}
 
-      {/* Modal: Projects */}
+      {/* Content Section */}
       <div className="p-4 flex-1 overflow-y-auto">
         {activeModal === "projects" && (
           <div className="bg-[#1f2937] p-4 rounded-lg border border-[#333]">
@@ -68,7 +80,15 @@ export default function ChatSection({
               <ul className="space-y-3">
                 {projects.map((project) => (
                   <li key={project._id} className="bg-[#121222] p-3 rounded border border-[#444]">
-                    <p className="text-indigo-400 font-semibold">{project.name}</p>
+                    <div className="flex justify-between items-center">
+                      <p className="text-indigo-400 font-semibold">{project.name}</p>
+                      <button
+                        onClick={() => handleAddCollabPrompt(project._id)}
+                        className="text-green-400 hover:text-green-300 text-sm flex items-center gap-1"
+                      >
+                        <FaPlus /> Add
+                      </button>
+                    </div>
                     <ul className="ml-4 mt-1 list-disc text-gray-400 text-sm">
                       {getUniqueUsers(project.users).map((u) => (
                         <li key={u._id}>{u.name} ({u.email})</li>
@@ -76,7 +96,7 @@ export default function ChatSection({
                     </ul>
                     <button
                       onClick={() => handleJoinProject(project)}
-                      className="mt-2 text-xs text-green-400 hover:text-green-300"
+                      className="mt-2 text-xs text-blue-400 hover:text-blue-300"
                     >
                       Join this project
                     </button>
@@ -104,7 +124,7 @@ export default function ChatSection({
               />
               <input
                 type="email"
-                placeholder="Collaborator Email"
+                placeholder="Collaborator Email (optional)"
                 value={collaboratorEmail}
                 onChange={(e) => setCollaboratorEmail(e.target.value)}
                 className="w-full p-3 rounded bg-[#0f172a] border border-[#444] text-white"
@@ -119,24 +139,17 @@ export default function ChatSection({
           </div>
         )}
 
-        {/* Modal: Add Collaborator */}
-        {activeModal === "addCollaborator" && (
-          <div className="bg-[#1f2937] p-4 rounded-lg border border-[#333]">
-            <div className="flex justify-between items-center mb-3">
-              <h2 className="text-lg font-semibold">Add Collaborator</h2>
-              <button onClick={() => setActiveModal(null)} className="text-red-400">✕</button>
-            </div>
-            <p className="text-gray-400">Feature coming soon...</p>
-          </div>
-        )}
-
         {/* Chat Messages */}
         <div className="space-y-2 mt-4 overflow-y-auto max-h-80" ref={chatRef}>
           {messages.map((msg, i) => {
             const isSelf = msg.sender === "user" && msg.senderId === user?._id;
+            const showName = msg.sender !== "ai" && !isSelf;
 
             return (
               <div key={`${msg.sender}-${msg.timestamp}-${i}`} className={`flex ${isSelf ? "justify-end" : "justify-start"}`}>
+                <div className="text-xs text-gray-300 mb-1">
+                  {showName && <span className="block font-semibold">{msg.senderName || "User"}</span>}
+                </div>
                 <div
                   className={`p-3 rounded-lg max-w-[70%] text-sm ${
                     msg.sender === "ai"
