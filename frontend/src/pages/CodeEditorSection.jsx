@@ -12,8 +12,6 @@ export default function CodeEditorSection({
   handleCodeChange,
   handleRunCode,
   output,
-  showOutput,
-  setShowOutput,
   socket,
   currentProjectId,
   executionStatus,
@@ -143,9 +141,10 @@ export default function CodeEditorSection({
     }
   };
 
+  const isWebProject = files.some(f => f.name.endsWith(".html") || f.name.endsWith(".css") || f.name.endsWith(".js"));
+
   return (
     <div className="flex flex-col w-full h-full bg-[#111827] text-white">
-      {/* Tabs */}
       <div className="flex bg-[#1f2937] px-4 py-2 border-b border-gray-700 space-x-2">
         {files.filter((item) => item.type === "file").map((file) => (
           <div
@@ -159,7 +158,6 @@ export default function CodeEditorSection({
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Explorer */}
         <div className="w-[220px] bg-[#1e293b] p-4 border-r border-gray-700">
           <div className="flex justify-between items-center mb-3 text-sm font-semibold">
             <span className="flex items-center gap-2"><FaFolder /> Explorer</span>
@@ -182,16 +180,15 @@ export default function CodeEditorSection({
           </ul>
         </div>
 
-        {/* Editor + Live Preview */}
         <div className="flex-1 grid grid-cols-2 gap-4 p-4 bg-[#0f172a] overflow-auto">
-          <div className="flex flex-col bg-[#1f2937] rounded-lg shadow-lg border border-gray-700">
+          <div className="flex flex-col bg-[#1f2937] rounded-lg shadow-lg border border-gray-700 h-full">
             <textarea
               value={code}
               onChange={handleCodeChange}
               placeholder="Start coding..."
-              className="w-full h-[300px] p-4 rounded-t bg-[#0f172a] text-white font-mono text-sm border-b border-gray-700 resize-none"
+              className="w-full flex-1 p-4 rounded-t bg-[#0f172a] text-white font-mono text-sm border-b border-gray-700 resize-none"
             />
-            <div className="p-3 flex justify-between items-center">
+            <div className="p-3 flex justify-between items-center border-t border-gray-700">
               <label className="text-sm flex items-center gap-2">
                 <input type="checkbox" checked={autoRun} onChange={() => setAutoRun(!autoRun)} className="accent-green-500" />
                 Live Mode
@@ -199,7 +196,6 @@ export default function CodeEditorSection({
               <button
                 onClick={() => {
                   handleRunCode();
-                  setShowOutput(true);
                 }}
                 className="bg-green-600 hover:bg-green-700 px-4 py-2 text-sm rounded-lg flex items-center gap-2 shadow"
               >
@@ -209,36 +205,31 @@ export default function CodeEditorSection({
           </div>
 
           <div className="flex flex-col rounded-lg overflow-hidden border border-gray-700 shadow-lg bg-white">
-            <iframe
-              title="Live Preview"
-              srcDoc={previewHTML}
-              sandbox="allow-scripts"
-              frameBorder="0"
-              className="w-full h-[350px]"
-            ></iframe>
-            <div className="bg-black text-green-400 text-xs font-mono p-2 h-[100px] overflow-y-auto">
-              {consoleLogs.length > 0 ? consoleLogs.map((log, index) => <div key={index}>{log}</div>) : (
-                <span className="text-gray-500">console.log output will appear here...</span>
-              )}
-            </div>
+            {isWebProject ? (
+              <iframe
+                title="Live Preview"
+                srcDoc={previewHTML}
+                sandbox="allow-scripts"
+                frameBorder="0"
+                className="w-full h-[350px]"
+              ></iframe>
+            ) : (
+              <div className="flex-1 bg-black text-green-400 text-xs font-mono p-4 overflow-y-auto">
+                <pre className="whitespace-pre-wrap">{output || "Waiting for output..."}</pre>
+              </div>
+            )}
+
+            {isWebProject && (
+              <div className="bg-black text-green-400 text-xs font-mono p-2 h-[100px] overflow-y-auto border-t border-gray-700">
+                {consoleLogs.length > 0
+                  ? consoleLogs.map((log, index) => <div key={index}>{log}</div>)
+                  : <span className="text-gray-500">console.log output will appear here...</span>
+                }
+              </div>
+            )}
           </div>
         </div>
       </div>
-
-      {showOutput && (
-        <div className="w-full bg-[#0f172a] border-t border-gray-700 max-h-64 overflow-y-auto shadow-inner z-50">
-          <div className="flex justify-between items-center px-4 py-2 bg-[#1e1e2f] border-b border-gray-600">
-            <h4 className="text-sm font-semibold">Terminal</h4>
-            <span className={`text-xs px-2 py-1 rounded ${executionStatus?.description === "Accepted" ? "bg-green-700 text-green-300" : "bg-red-700 text-red-300"}`}>
-              {executionStatus?.description || "Running..."}
-            </span>
-            <button onClick={() => setShowOutput(false)} className="text-red-400 hover:text-red-500">✕</button>
-          </div>
-          <pre className="px-4 py-3 text-sm font-mono text-green-300 whitespace-pre-wrap">
-            {output || "Waiting for output..."}
-          </pre>
-        </div>
-      )}
 
       {showPromptModal && (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center">
