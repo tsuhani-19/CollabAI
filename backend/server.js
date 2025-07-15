@@ -10,6 +10,7 @@ const setupSocket = require("./socket.js");
 const chatRoutes = require("./routes/chatRoutes.js");
 const runRoute = require("./routes/runRoutes.js");
 const websiteBuilderRoutes = require("./routes/websiteBuilder.js");
+const saveProjectRoute = require("./routes/saveRoutes.js");
 
 const app = express();
 const server = http.createServer(app);
@@ -33,9 +34,13 @@ app.use("/api/project", projectRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/run", runRoute);
 app.use("/api/generate-website", websiteBuilderRoutes);
+app.use("/api/save-project", saveProjectRoute);
 
+// ✅ Serve static preview from disk (important!)
+const path = require("path");
+app.use("/sites", express.static(path.join(__dirname, "generated-sites")));
 
-// Dynamically load aiRoutes (to support ES module syntax)
+// Dynamically load aiRoutes (ES Module)
 (async () => {
   try {
     const aiRoutes = await import("./routes/aiRoutes.js");

@@ -16,7 +16,7 @@ export default function ChatSection({
   collaboratorEmail,
   setCollaboratorEmail,
   handleCreateProject,
-  handleAddCollaborator, // ✅ you must pass this handler from parent
+  handleAddCollaborator,
   messages,
   chatRef,
   input,
@@ -142,26 +142,30 @@ export default function ChatSection({
         {/* Chat Messages */}
         <div className="space-y-2 mt-4 overflow-y-auto max-h-80" ref={chatRef}>
           {messages.map((msg, i) => {
-            const isSelf = msg.sender === "user" && msg.senderId === user?._id;
+            const isSelf = msg.senderId === user?._id;  // ✅ Fixed: Compare senderId directly
             const showName = msg.sender !== "ai" && !isSelf;
 
             return (
               <div key={`${msg.sender}-${msg.timestamp}-${i}`} className={`flex ${isSelf ? "justify-end" : "justify-start"}`}>
-                <div className="text-xs text-gray-300 mb-1">
-                  {showName && <span className="block font-semibold">{msg.senderName || "User"}</span>}
-                </div>
-                <div
-                  className={`p-3 rounded-lg max-w-[70%] text-sm ${
-                    msg.sender === "ai"
-                      ? "bg-[#37376e] text-green-300"
-                      : msg.sender === "loading"
-                      ? "bg-gray-700 text-gray-300 italic"
-                      : isSelf
-                      ? "bg-blue-500 text-white"
-                      : "bg-[#2a2a40] text-white"
-                  }`}
-                >
-                  {msg.message}
+                <div>
+                  {showName && (
+                    <div className="text-xs text-gray-300 mb-1">
+                      <span className="block font-semibold">{msg.senderName || "User"}</span>
+                    </div>
+                  )}
+                  <div
+                    className={`p-3 rounded-lg max-w-[70%] text-sm ${
+                      msg.sender === "ai"
+                        ? "bg-[#37376e] text-green-300"
+                        : msg.sender === "loading"
+                        ? "bg-gray-700 text-gray-300 italic"
+                        : isSelf
+                        ? "bg-blue-500 text-white"
+                        : "bg-[#2a2a40] text-white"
+                    }`}
+                  >
+                    {msg.message}
+                  </div>
                 </div>
               </div>
             );

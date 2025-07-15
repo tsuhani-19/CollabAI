@@ -1,4 +1,5 @@
-const Chat = require('../models/Chat');
+const Chat = require('../models/Chat.js');
+const User = require('../models/User.js');
 
 exports.getChatsByProject = async (req, res) => {
   try {
@@ -6,14 +7,12 @@ exports.getChatsByProject = async (req, res) => {
     const chats = await Chat.find({ projectId }).sort({ timestamp: 1 });
     res.status(200).json(chats);
   } catch (err) {
-    res.status(500).json({ message: 'Error fetching chat history' });
+    res.status(500).json({ message: 'Error fetching chat history', error: err.message });
   }
 };
 
-
-
 exports.createChatMessageAPI = async (req, res) => {
-  const { projectId, sender, senderId, message } = req.body;
+  const { projectId, sender, message } = req.body;
 
   if (!projectId || !message || !sender) {
     return res.status(400).json({ message: "Missing fields" });
@@ -36,14 +35,12 @@ exports.createChatMessageAPI = async (req, res) => {
       senderId: sender === "user" ? req.user._id : null,
       senderName: name,
       message,
-      timestamp: new Date(),
     });
 
     await newMessage.save();
     res.status(201).json(newMessage);
   } catch (err) {
     console.error("Chat Error:", err);
-    res.status(500).json({ message: "Failed to send message" });
+    res.status(500).json({ message: "Failed to send message", error: err.message });
   }
 };
-

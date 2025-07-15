@@ -1,5 +1,8 @@
-import React, { useState, useEffect } from "react";
-import { FaPlay, FaFolder, FaFile, FaPlus, FaMagic } from "react-icons/fa";
+import React, { useState } from "react";
+import {
+  FaPlay, FaFolder, FaFile, FaPlus, FaMagic, FaTrash,
+  FaEdit, FaFileAlt, FaFolderPlus, FaTerminal
+} from "react-icons/fa";
 import axios from "axios";
 
 export default function CodeEditorSection({
@@ -10,101 +13,123 @@ export default function CodeEditorSection({
   setCode,
   code,
   handleCodeChange,
-  handleRunCode,
-  output,
   socket,
   currentProjectId,
-  executionStatus,
 }) {
   const [showPromptModal, setShowPromptModal] = useState(false);
   const [userPrompt, setUserPrompt] = useState("");
   const [loading, setLoading] = useState(false);
-  const [previewHTML, setPreviewHTML] = useState("");
-  const [autoRun, setAutoRun] = useState(true);
-  const [consoleLogs, setConsoleLogs] = useState([]);
-
-  const generateLivePreviewHTML = () => {
-    const htmlFile = files.find((f) => f.name.endsWith(".html"))?.content || "";
-    const cssFile = files.find((f) => f.name.endsWith(".css"))?.content || "";
-    const jsFile = files.find((f) => f.name.endsWith(".js"))?.content || "";
-
-    const consoleScript = `
-      <script>
-        const originalLog = console.log;
-        console.log = function (...args) {
-          originalLog(...args);
-          parent.postMessage({ type: 'console-log', data: args }, '*');
-        };
-      <\/script>
-    `;
-
-    return `
-      <!DOCTYPE html>
-      <html lang="en">
-      <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Live Preview</title>
-        <style>${cssFile}</style>
-      </head>
-      <body>
-        ${htmlFile}
-        ${consoleScript}
-        <script>${jsFile.replace(/<\/script>/g, "<\\/script>")}</script>
-      </body>
-      </html>
-    `;
-  };
-
-  useEffect(() => {
-    if (!autoRun) return;
-    const timeout = setTimeout(() => {
-      setPreviewHTML(generateLivePreviewHTML());
-      setConsoleLogs([]);
-    }, 300);
-    return () => clearTimeout(timeout);
-  }, [files, code, autoRun]);
-
-  useEffect(() => {
-    const handleMessage = (event) => {
-      if (event.data?.type === "console-log") {
-        setConsoleLogs((prev) => [...prev, ...event.data.data.map((d) => String(d))]);
-      }
-    };
-    window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
-  }, []);
+  const [showTerminal, setShowTerminal] = useState(false);
+  const [output, setOutput] = useState("");
 
   const handleSelectFile = (file) => {
-    setActiveFile(file.name);
-    setCode(file.content || "");
+    if (file.type === "file") {
+      setActiveFile(file.name);
+      setCode(file.content || "");
+    }
   };
 
-  const handleAddItemToFiles = () => {
-    const name = prompt("Enter file or folder name (e.g. App.js or utils):");
+  const handleAddFileOrFolder = (isFolder = false, parent = null) => {
+    const name = prompt(`Enter ${isFolder ? "folder" : "file"} name:`);
     if (!name) return;
-
-    const isFolder = !name.includes(".");
-    const exists = files.some((item) => item.name === name);
+    const fullName = parent ? `${parent}/${name}` : name;
+    const exists = files.some((f) => f.name === fullName);
     if (exists) return alert("Item already exists");
 
     const newItem = {
-      name,
+      name: fullName,
       type: isFolder ? "folder" : "file",
       content: isFolder ? null : "",
     };
 
-    const updatedFiles = [...files, newItem];
+    const updated = [...files, newItem];
+    setFiles(updated);
+    if (socket && currentProjectId)
+      socket.emit("sync-files", { projectId: currentProjectId, files: updated });
+  };
+
+  const handleRename = (item) => {
+    const newName = prompt("Enter new name:", item.name);
+    if (!newName || newName === item.name) return;
+    const updatedFiles = files.map((f) =>
+      f.name === item.name ? { ...f, name: newName } : f
+    );
     setFiles(updatedFiles);
-
-    if (currentProjectId && socket) {
+    if (socket && currentProjectId)
       socket.emit("sync-files", { projectId: currentProjectId, files: updatedFiles });
-    }
+  };
 
-    if (newItem.type === "file") {
-      setActiveFile(name);
-      setCode("");
+  const handleDelete = (item) => {
+    const updated = files.filter((f) => !f.name.startsWith(item.name));
+    setFiles(updated);
+    if (socket && currentProjectId)
+      socket.emit("sync-files", { projectId: currentProjectId, files: updated });
+  };
+
+  const getLanguageId = (fileName) => {
+    if (!fileName) return 71;
+    const ext = fileName.split(".").pop();
+    const map = {
+      js: 63,
+      py: 71,
+      cpp: 54,
+      c: 50,
+      java: 62,
+      php: 68,
+      rb: 72,
+      go: 60,
+      cs: 51,
+    };
+    return map[ext] || 71;
+  };
+
+  const handleRunCode = async () => {
+    const languageId = getLanguageId(activeFile);
+    try {
+      const res = await axios.post("http://localhost:5000/api/run", {
+        code,
+        languageId,
+        stdin: "",
+      });
+
+      const { stdout, stderr, compile_output, message } = res.data;
+      const finalOutput = stdout || compile_output || stderr || message || "No output";
+      setOutput(finalOutput);
+      setShowTerminal(true);
+    } catch (err) {
+      setOutput("❌ Code run failed: " + (err.response?.data?.error || err.message));
+      setShowTerminal(true);
     }
+  };
+
+  const renderExplorer = (parent = "") => {
+    return files
+      .filter((f) => f.name.startsWith(parent) && f.name.replace(parent, "").split("/").length === 1)
+      .map((item) => (
+        <li key={item.name} className="group">
+          <div
+            className={`flex justify-between items-center gap-2 cursor-pointer px-2 py-1 rounded-md hover:bg-[#2c2f4a] ${activeFile === item.name ? "bg-[#374151]" : ""}`}
+            onClick={() => handleSelectFile(item)}
+          >
+            <span className="flex items-center gap-2">
+              {item.type === "file" ? <FaFileAlt /> : <FaFolder />}
+              {item.name.split("/").pop()}
+            </span>
+            <span className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+              <button onClick={(e) => { e.stopPropagation(); handleRename(item); }}><FaEdit className="text-yellow-400" /></button>
+              <button onClick={(e) => { e.stopPropagation(); handleDelete(item); }}><FaTrash className="text-red-400" /></button>
+              {item.type === "folder" && (
+                <button onClick={(e) => { e.stopPropagation(); handleAddFileOrFolder(false, item.name); }}><FaPlus className="text-green-400" /></button>
+              )}
+            </span>
+          </div>
+          {item.type === "folder" && (
+            <ul className="ml-4 border-l border-gray-600 pl-2">
+              {renderExplorer(item.name + "/")}
+            </ul>
+          )}
+        </li>
+      ));
   };
 
   const handleGenerateAIProject = async () => {
@@ -112,119 +137,91 @@ export default function CodeEditorSection({
     setLoading(true);
 
     try {
-      const res = await axios.post("http://localhost:5000/api/generate-website", {
-        userGoal: userPrompt,
-      });
-
+      const res = await axios.post("http://localhost:5000/api/generate-website", { userGoal: userPrompt });
       const generated = res.data;
       const newFiles = generated.files.map((file) => ({
-        name: file.path.split("/").pop(),
+        name: file.path,
         type: "file",
         content: file.content,
       }));
-
       setFiles(newFiles);
       setActiveFile(newFiles[0]?.name || "");
       setCode(newFiles[0]?.content || "");
-
-      if (currentProjectId && socket) {
+      if (currentProjectId && socket)
         socket.emit("sync-files", { projectId: currentProjectId, files: newFiles });
-      }
-
       setShowPromptModal(false);
       setUserPrompt("");
     } catch (err) {
       alert("Failed to generate website from AI.");
-      console.error(err);
     } finally {
       setLoading(false);
     }
   };
 
-  const isWebProject = files.some(f => f.name.endsWith(".html") || f.name.endsWith(".css") || f.name.endsWith(".js"));
+  const handleOpenLivePreview = async () => {
+    const projectName = currentProjectId || "my-live-preview";
+    try {
+      await axios.post("http://localhost:5000/api/save-project", { projectName, files });
+      window.open(`http://localhost:5000/sites/${projectName}/index.html`, "_blank");
+    } catch (err) {
+      alert("Failed to save and open live preview.");
+    }
+  };
 
   return (
-    <div className="flex flex-col w-full h-full bg-[#111827] text-white">
-      <div className="flex bg-[#1f2937] px-4 py-2 border-b border-gray-700 space-x-2">
-        {files.filter((item) => item.type === "file").map((file) => (
+    <div className="flex flex-col w-full h-full bg-gradient-to-br from-[#111827] via-black to-[#0f172a] text-white font-mono">
+      {/* Explorer Tabs */}
+      <div className="flex bg-[#1f2937] px-4 py-2 border-b border-gray-700 space-x-2 text-sm">
+        {files.filter(f => f.type === "file").map(f => (
           <div
-            key={file.name}
-            className={`px-4 py-1 rounded-t text-sm font-mono cursor-pointer ${activeFile === file.name ? "bg-[#374151]" : "bg-[#1a1a2e]"}`}
-            onClick={() => handleSelectFile(file)}
-          >
-            {file.name}
-          </div>
+            key={f.name}
+            onClick={() => handleSelectFile(f)}
+            className={`px-3 py-1 rounded-t cursor-pointer ${activeFile === f.name ? "bg-[#374151]" : "hover:bg-[#2c2f4a]"}`}
+          >{f.name.split("/").pop()}</div>
         ))}
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        <div className="w-[220px] bg-[#1e293b] p-4 border-r border-gray-700">
-          <div className="flex justify-between items-center mb-3 text-sm font-semibold">
-            <span className="flex items-center gap-2"><FaFolder /> Explorer</span>
+        {/* File Explorer */}
+        <div className="w-[240px] bg-[#1e293b] p-3 border-r border-gray-700">
+          <div className="flex justify-between items-center mb-2">
+            <span className="flex items-center gap-2 text-sm font-semibold"><FaFolder /> Explorer</span>
             <div className="flex gap-2">
-              <button onClick={() => setShowPromptModal(true)} title="AI Generate" className="text-purple-400 hover:text-purple-300"><FaMagic /></button>
-              <button onClick={handleAddItemToFiles} title="Add" className="text-green-400 hover:text-green-300"><FaPlus /></button>
+              <button onClick={() => setShowPromptModal(true)} title="AI" className="text-purple-400"><FaMagic /></button>
+              <button onClick={() => handleAddFileOrFolder(false)} className="text-green-400"><FaFile /></button>
+              <button onClick={() => handleAddFileOrFolder(true)} className="text-yellow-400"><FaFolderPlus /></button>
             </div>
           </div>
-          <ul className="space-y-2 text-xs">
-            {files.map((item) => (
-              <li
-                key={item.name}
-                className={`flex items-center gap-2 cursor-pointer hover:text-indigo-400 ${item.type === "file" ? "" : "text-yellow-400"}`}
-                onClick={() => item.type === "file" && handleSelectFile(item)}
-              >
-                {item.type === "file" ? <FaFile /> : <FaFolder />}
-                {item.name}
-              </li>
-            ))}
+          <ul className="text-xs space-y-1">
+            {renderExplorer()}
           </ul>
         </div>
 
-        <div className="flex-1 grid grid-cols-2 gap-4 p-4 bg-[#0f172a] overflow-auto">
-          <div className="flex flex-col bg-[#1f2937] rounded-lg shadow-lg border border-gray-700 h-full">
+        {/* Code Editor */}
+        <div className="flex-1 p-4 bg-[#0f172a] overflow-auto">
+          <div className="flex flex-col bg-[#1f2937] h-full rounded-xl shadow-xl border border-gray-700">
             <textarea
               value={code}
               onChange={handleCodeChange}
-              placeholder="Start coding..."
-              className="w-full flex-1 p-4 rounded-t bg-[#0f172a] text-white font-mono text-sm border-b border-gray-700 resize-none"
+              className="w-full flex-1 p-4 bg-[#0f172a] text-white text-sm rounded-t-xl resize-none outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Write your code here..."
             />
             <div className="p-3 flex justify-between items-center border-t border-gray-700">
-              <label className="text-sm flex items-center gap-2">
-                <input type="checkbox" checked={autoRun} onChange={() => setAutoRun(!autoRun)} className="accent-green-500" />
-                Live Mode
-              </label>
-              <button
-                onClick={() => {
-                  handleRunCode();
-                }}
-                className="bg-green-600 hover:bg-green-700 px-4 py-2 text-sm rounded-lg flex items-center gap-2 shadow"
-              >
-                <FaPlay /> Run
-              </button>
-            </div>
-          </div>
-
-          <div className="flex flex-col rounded-lg overflow-hidden border border-gray-700 shadow-lg bg-white">
-            {isWebProject ? (
-              <iframe
-                title="Live Preview"
-                srcDoc={previewHTML}
-                sandbox="allow-scripts"
-                frameBorder="0"
-                className="w-full h-[350px]"
-              ></iframe>
-            ) : (
-              <div className="flex-1 bg-black text-green-400 text-xs font-mono p-4 overflow-y-auto">
-                <pre className="whitespace-pre-wrap">{output || "Waiting for output..."}</pre>
+              <div className="text-xs text-gray-400 cursor-pointer flex items-center gap-2" onClick={() => setShowTerminal(!showTerminal)}>
+                <FaTerminal /> Terminal
               </div>
-            )}
-
-            {isWebProject && (
-              <div className="bg-black text-green-400 text-xs font-mono p-2 h-[100px] overflow-y-auto border-t border-gray-700">
-                {consoleLogs.length > 0
-                  ? consoleLogs.map((log, index) => <div key={index}>{log}</div>)
-                  : <span className="text-gray-500">console.log output will appear here...</span>
-                }
+              <div className="flex gap-2">
+                <button onClick={handleRunCode} className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg flex items-center gap-2 text-sm">
+                  <FaPlay /> Run
+                </button>
+                <button onClick={handleOpenLivePreview} className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm">
+                  🌐 Live Preview
+                </button>
+              </div>
+            </div>
+            {showTerminal && (
+              <div className="bg-black text-green-400 text-xs font-mono p-3 h-[150px] overflow-y-auto border-t border-gray-700">
+                {output || "No output yet..."}
               </div>
             )}
           </div>
@@ -243,17 +240,8 @@ export default function CodeEditorSection({
               placeholder="Describe the website you want to build..."
             />
             <div className="flex justify-end gap-2 mt-4">
-              <button
-                onClick={() => setShowPromptModal(false)}
-                className="px-4 py-2 bg-gray-600 rounded hover:bg-gray-700"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleGenerateAIProject}
-                disabled={loading}
-                className="px-4 py-2 bg-purple-600 rounded hover:bg-purple-700 flex items-center gap-2"
-              >
+              <button onClick={() => setShowPromptModal(false)} className="px-4 py-2 bg-gray-600 rounded hover:bg-gray-700">Cancel</button>
+              <button onClick={handleGenerateAIProject} disabled={loading} className="px-4 py-2 bg-purple-600 rounded hover:bg-purple-700 flex items-center gap-2">
                 {loading ? "Generating..." : "Generate"}
               </button>
             </div>

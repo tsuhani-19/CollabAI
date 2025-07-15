@@ -50,7 +50,7 @@ router.post("/", async (req, res) => {
       result = statusResponse.data;
       if (result.status && result.status.id >= 3) break;
 
-      await new Promise((resolve) => setTimeout(resolve, 500)); // Wait before polling again
+      await new Promise((resolve) => setTimeout(resolve, 500));
       tries++;
     }
 
@@ -65,9 +65,13 @@ router.post("/", async (req, res) => {
       message: result.message,
       status: result.status,
     });
+
   } catch (err) {
-    console.error("⚠️ Judge0 error:", err.message);
-    res.status(500).json({ error: "Code execution failed" });
+    console.error("⚠️ Judge0 error:", err.response?.data || err.message || err);
+    res.status(500).json({
+      error: "Code execution failed",
+      details: err.response?.data || err.message || err,
+    });
   }
 });
 

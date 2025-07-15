@@ -49,26 +49,30 @@ export default function Dashboard() {
     fetchProjects();
     if (!socket.connected) socket.connect();
 
-    socket.on("connect", () => console.log("✅ Socket connected"));
-    socket.on("receive-message", (msg) => {
-      console.log("📥 Message received:", msg);
+    const handleReceiveMessage = (msg) => {
       setMessages((prev) => [...prev, msg]);
-    });
-    socket.on("receive-code", (newCode) => {
-      console.log("📥 Code received:", newCode);
+    };
+
+    const handleReceiveCode = (newCode) => {
       setCode(newCode);
       updateFileContent(activeFile, newCode);
-    });
-    socket.on("sync-files", (incomingFiles) => {
-      console.log("📥 Files synced:", incomingFiles);
+    };
+
+    const handleSyncFiles = (incomingFiles) => {
       setFiles(incomingFiles);
-    });
+    };
+
+    socket.on("connect", () => console.log("✅ Socket connected"));
+    socket.on("receive-message", handleReceiveMessage);
+    socket.on("receive-code", handleReceiveCode);
+    socket.on("sync-files", handleSyncFiles);
 
     return () => {
-      socket.off("receive-message");
-      socket.off("receive-code");
-      socket.off("sync-files");
+      socket.off("receive-message", handleReceiveMessage);
+      socket.off("receive-code", handleReceiveCode);
+      socket.off("sync-files", handleSyncFiles);
       socket.off("connect");
+      socket.disconnect();
     };
   }, [activeFile]);
 
@@ -111,7 +115,7 @@ export default function Dashboard() {
       const savedFiles = res.data.files || [];
       setCode(savedCode);
       setFiles(savedFiles);
-      updateFileContent(activeFile, savedCode);
+      setActiveFile(savedFiles[0]?.name || "App.js");
 
       socket.emit("join-room", { projectId: project._id, userId: user._id });
       socket.emit("sync-files", { projectId: project._id, files: savedFiles });
@@ -123,88 +127,78 @@ export default function Dashboard() {
     }
   };
 
-const sendMessage = async () => {
-  if (!input.trim() || !currentProject) return;
+  const sendMessage = async () => {
+    if (!input.trim() || !currentProject) return;
 
-  const userMsg = input;
-  setInput("");
+    const userMsg = input;
+    setInput("");
 
-  const messageData = {
-    projectId: currentProject._id,
-    sender: "user",
-    senderId: user._id,
-    message: userMsg,
-    timestamp: new Date(),
-  };
+    const messageData = {
+      projectId: currentProject._id,
+      sender: "user",
+      senderId: user._id,
+      message: userMsg,
+      timestamp: new Date(),
+    };
 
-  // 👇 Immediately show user message in chat
-  setMessages((prev) => [...prev, messageData]);
-
-  // 🔌 Emit to other users
-  socket.emit("send-message", messageData);
-
-  // 💾 Save in DB
-  try {
-    await axios.post("http://localhost:5000/api/chat", messageData, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-  } catch (err) {
-    console.error("Error saving message:", err);
-  }
-
-  // 🤖 AI logic
-  if (userMsg.startsWith("@ai")) {
-    const prompt = userMsg.replace("@ai", "").trim();
-    if (!prompt) return toast.warn("Please write something after @ai");
-
-    setIsLoading(true);
-    setMessages((prev) => [
-      ...prev,
-      {
-        sender: "loading",
-        message: "🤖 AI is typing...",
-        timestamp: new Date(),
-      },
-    ]);
+    socket.emit("send-message", messageData);
 
     try {
-      const res = await axios.post(
-        "http://localhost:5000/api/ai/reply",
-        { prompt },
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-
-      const aiMessage = {
-        projectId: currentProject._id,
-        sender: "ai",
-        senderId: "ai-bot",
-        message: `🤖 ${res.data.reply}`,
-        timestamp: new Date(),
-      };
-
-      socket.emit("send-message", aiMessage);
-
-      // 👇 Save AI reply to DB
-      await axios.post("http://localhost:5000/api/chat", aiMessage, {
+      await axios.post("http://localhost:5000/api/chat", messageData, {
         headers: { Authorization: `Bearer ${token}` },
       });
-
-      // 👇 Show AI reply
-      setMessages((prev) => [...prev.filter((msg) => msg.sender !== "loading"), aiMessage]);
-
     } catch (err) {
-      toast.error("AI couldn't respond.");
-      setMessages((prev) => prev.filter((msg) => msg.sender !== "loading"));
-    } finally {
-      setIsLoading(false);
+      console.error("Error saving message:", err);
     }
-  }
-};
 
+    if (userMsg.startsWith("@ai")) {
+      const prompt = userMsg.replace("@ai", "").trim();
+      if (!prompt) return toast.warn("Please write something after @ai");
 
+      setIsLoading(true);
+      setMessages((prev) => [
+        ...prev,
+        {
+          sender: "loading",
+          message: "🤖 AI is typing...",
+          timestamp: new Date(),
+        },
+      ]);
 
+      try {
+        const res = await axios.post(
+          "http://localhost:5000/api/ai/reply",
+          { prompt },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        const aiMessage = {
+          projectId: currentProject._id,
+          sender: "ai",
+          senderId: null,
+          message: `🤖 ${res.data.reply}`,
+          timestamp: new Date(),
+        };
+
+        socket.emit("send-message", aiMessage);
+
+        await axios.post("http://localhost:5000/api/chat", aiMessage, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        setMessages((prev) => [
+          ...prev.filter((msg) => msg.sender !== "loading"),
+          aiMessage,
+        ]);
+
+      } catch (err) {
+        toast.error("AI couldn't respond.");
+        setMessages((prev) => prev.filter((msg) => msg.sender !== "loading"));
+      } finally {
+        setIsLoading(false);
+      }
+    }
+  };
 
   const handleCodeChange = (e) => {
     const newCode = e.target.value;
@@ -251,9 +245,7 @@ const sendMessage = async () => {
         stdin,
       });
       const data = res.data;
-      setOutput(
-        data.stdout || data.compile_output || data.stderr || data.message || "No output"
-      );
+      setOutput(data.stdout || data.compile_output || data.stderr || data.message || "No output");
       setExecutionStatus(data.status);
     } catch (err) {
       setOutput("Execution error");
@@ -308,6 +300,7 @@ const sendMessage = async () => {
         collaboratorEmail={collaboratorEmail}
         setCollaboratorEmail={setCollaboratorEmail}
         handleCreateProject={handleCreateProject}
+        handleAddCollaborator={handleCreateProject}
         messages={messages}
         chatRef={chatRef}
         input={input}

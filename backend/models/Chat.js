@@ -9,19 +9,21 @@ const ChatSchema = new mongoose.Schema({
   senderId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
-    required: false, // not required for AI
+    required: false,
   },
   sender: {
-    type: String, // 'user' or 'ai'
+    type: String,  // 'user' or 'ai'
     required: true,
+    trim: true,
   },
   senderName: {
-    type: String, // actual name (e.g., "Suhani Tiwari")
-    required: false, // required for user, not for ai
+    type: String,
+    trim: true,
   },
   message: {
     type: String,
     required: true,
+    trim: true,
   },
   timestamp: {
     type: Date,
@@ -29,5 +31,7 @@ const ChatSchema = new mongoose.Schema({
   },
 });
 
+// Optional Index for faster querying by project and time
+ChatSchema.index({ projectId: 1, timestamp: 1 });
 
 module.exports = mongoose.model("Chat", ChatSchema);
