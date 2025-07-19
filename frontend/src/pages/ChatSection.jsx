@@ -1,5 +1,4 @@
-import React from "react";
-import { toast } from "react-toastify";
+import React, { useEffect } from "react";
 import { FaBars, FaPlus } from "react-icons/fa";
 import { useUser } from "../context/UserContext";
 
@@ -26,9 +25,18 @@ export default function ChatSection({
 }) {
   const { user } = useUser();
 
+  useEffect(() => {
+    if (chatRef.current) {
+      chatRef.current.scrollTo({
+        top: chatRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  }, [messages]);
+
   const getUniqueUsers = (users) => {
     const map = new Map();
-    users.forEach((u) => {
+    users?.forEach((u) => {
       if (u && u._id) map.set(u._id, u);
     });
     return Array.from(map.values());
@@ -42,7 +50,7 @@ export default function ChatSection({
   };
 
   return (
-    <div className="w-1/4 bg-[#1a1a2e] flex flex-col border-r border-[#2c2c3e]">
+    <div className="w-1/4 bg-[#1a1a2e] flex flex-col border-r border-[#2c2c3e] text-white">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-[#2c2c3e]">
         <button onClick={() => setMenuOpen(!menuOpen)}>
@@ -51,37 +59,53 @@ export default function ChatSection({
         <h2 className="text-lg font-bold">CollabAI</h2>
       </div>
 
-      {/* Sidebar Menu */}
+      {/* Menu */}
       {menuOpen && (
         <div className="p-4 space-y-2 text-sm border-b border-[#333] bg-[#1f2937]">
-          <button onClick={() => setActiveModal("newProject")} className="block w-full text-left hover:text-indigo-400">
+          <button
+            onClick={() => setActiveModal("newProject")}
+            className="block w-full text-left hover:text-indigo-400"
+          >
             New Project
           </button>
-          <button onClick={() => setActiveModal("projects")} className="block w-full text-left hover:text-indigo-400">
+          <button
+            onClick={() => setActiveModal("projects")}
+            className="block w-full text-left hover:text-indigo-400"
+          >
             My Projects
           </button>
-          <button onClick={handleLogout} className="block w-full text-left text-red-400 hover:text-red-600">
+          <button
+            onClick={handleLogout}
+            className="block w-full text-left text-red-400 hover:text-red-600"
+          >
             Logout
           </button>
         </div>
       )}
 
-      {/* Content Section */}
-      <div className="p-4 flex-1 overflow-y-auto">
+      {/* Modals */}
+      <div className="p-4 flex-1 overflow-y-auto space-y-4">
         {activeModal === "projects" && (
           <div className="bg-[#1f2937] p-4 rounded-lg border border-[#333]">
             <div className="flex justify-between items-center mb-3">
               <h2 className="text-lg font-semibold">My Projects</h2>
-              <button onClick={() => setActiveModal(null)} className="text-red-400">✕</button>
+              <button onClick={() => setActiveModal(null)} className="text-red-400">
+                ✕
+              </button>
             </div>
             {projects.length === 0 ? (
               <p className="text-gray-400">No projects found.</p>
             ) : (
               <ul className="space-y-3">
                 {projects.map((project) => (
-                  <li key={project._id} className="bg-[#121222] p-3 rounded border border-[#444]">
+                  <li
+                    key={project._id}
+                    className="bg-[#121222] p-3 rounded border border-[#444]"
+                  >
                     <div className="flex justify-between items-center">
-                      <p className="text-indigo-400 font-semibold">{project.name}</p>
+                      <p className="text-indigo-400 font-semibold truncate">
+                        {project.name}
+                      </p>
                       <button
                         onClick={() => handleAddCollabPrompt(project._id)}
                         className="text-green-400 hover:text-green-300 text-sm flex items-center gap-1"
@@ -91,7 +115,9 @@ export default function ChatSection({
                     </div>
                     <ul className="ml-4 mt-1 list-disc text-gray-400 text-sm">
                       {getUniqueUsers(project.users).map((u) => (
-                        <li key={u._id}>{u.name} ({u.email})</li>
+                        <li key={u._id}>
+                          {u.name} ({u.email})
+                        </li>
                       ))}
                     </ul>
                     <button
@@ -107,12 +133,14 @@ export default function ChatSection({
           </div>
         )}
 
-        {/* Modal: New Project */}
+        {/* Create Project */}
         {activeModal === "newProject" && (
           <div className="bg-[#1f2937] p-4 rounded-lg border border-[#333]">
             <div className="flex justify-between items-center mb-3">
               <h2 className="text-lg font-semibold">Create New Project</h2>
-              <button onClick={() => setActiveModal(null)} className="text-red-400">✕</button>
+              <button onClick={() => setActiveModal(null)} className="text-red-400">
+                ✕
+              </button>
             </div>
             <form onSubmit={handleCreateProject} className="space-y-4">
               <input
@@ -140,28 +168,33 @@ export default function ChatSection({
         )}
 
         {/* Chat Messages */}
-        <div className="space-y-2 mt-4 overflow-y-auto max-h-80" ref={chatRef}>
-          {messages.map((msg, i) => {
-            const isSelf = msg.senderId === user?._id;  // ✅ Fixed: Compare senderId directly
-            const showName = msg.sender !== "ai" && !isSelf;
+        <div
+          ref={chatRef}
+          className="flex flex-col gap-3 px-2 py-2 max-h-[400px] overflow-y-auto pr-2 rounded scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800"
+        >
+          {messages.map((msg, index) => {
+            const isSelf = String(msg.senderId) === String(user?.id);
+            const isAI = msg.sender === "ai";
+            const showName = !isSelf && !isAI;
 
             return (
-              <div key={`${msg.sender}-${msg.timestamp}-${i}`} className={`flex ${isSelf ? "justify-end" : "justify-start"}`}>
-                <div>
+              <div
+                key={`${msg.senderId || index}-${msg.timestamp}-${index}`}
+                className={`flex w-full ${isSelf ? "justify-end" : "justify-start"}`}
+              >
+                <div className="max-w-[75%]">
                   {showName && (
-                    <div className="text-xs text-gray-300 mb-1">
-                      <span className="block font-semibold">{msg.senderName || "User"}</span>
-                    </div>
+                    <p className="text-xs text-gray-400 mb-1">
+                      {msg.senderName || "User"}
+                    </p>
                   )}
                   <div
-                    className={`p-3 rounded-lg max-w-[70%] text-sm ${
-                      msg.sender === "ai"
-                        ? "bg-[#37376e] text-green-300"
-                        : msg.sender === "loading"
-                        ? "bg-gray-700 text-gray-300 italic"
+                    className={`px-4 py-2 rounded-2xl text-sm shadow-md break-words whitespace-pre-wrap ${
+                      isAI
+                        ? "bg-purple-800 text-green-300"
                         : isSelf
-                        ? "bg-blue-500 text-white"
-                        : "bg-[#2a2a40] text-white"
+                        ? "bg-blue-600 text-white"
+                        : "bg-gray-700 text-white"
                     }`}
                   >
                     {msg.message}
@@ -174,7 +207,7 @@ export default function ChatSection({
       </div>
 
       {/* Input */}
-      <div className="p-4 border-t border-[#333]">
+      <div className="p-4 border-t border-[#333] bg-[#1a1a2e]">
         <div className="flex gap-2">
           <input
             value={input}
@@ -185,12 +218,13 @@ export default function ChatSection({
           />
           <button
             onClick={sendMessage}
+            disabled={isLoading}
             className="bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded text-sm"
           >
-            Send
+            {isLoading ? "..." : "Send"}
           </button>
         </div>
       </div>
     </div>
   );
-}
+} 

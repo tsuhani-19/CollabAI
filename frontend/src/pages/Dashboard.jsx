@@ -1,3 +1,4 @@
+// Dashboard.js
 import React, { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
@@ -8,22 +9,20 @@ import CodeEditorSection from "./CodeEditorSection";
 import api from "../services/api";
 import { useUser } from "../context/UserContext";
 
-const languageMap = {
-  js: 63,
-  py: 71,
-  cpp: 54,
-  c: 50,
-  java: 62,
-};
+const languageMap = { js: 63, py: 71, cpp: 54, c: 50, java: 62 };
 
 const getLanguageIdFromFile = (filename) => {
   const ext = filename.split(".").pop().toLowerCase();
   return languageMap[ext] || 71;
 };
 
+// To avoid duplicate messages
+const receivedMessages = new Set();
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const { user } = useUser();
+  const token = localStorage.getItem("token");
 
   const [projects, setProjects] = useState([]);
   const [currentProject, setCurrentProject] = useState(null);
@@ -41,15 +40,37 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(false);
   const [executionStatus, setExecutionStatus] = useState(null);
   const [stdin, setStdin] = useState("");
+  const [hasJoinedRoom, setHasJoinedRoom] = useState(false);
 
   const chatRef = useRef();
-  const token = localStorage.getItem("token");
+
+  const handleAxiosError = (err) => {
+    toast.error(err?.response?.data?.message || "Something went wrong");
+  };
+
+  // Format timestamp to show HH:MM AM/PM
+  const formatTime = (dateString) => {
+    const date = new Date(dateString);
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  };
 
   useEffect(() => {
     fetchProjects();
-    if (!socket.connected) socket.connect();
 
     const handleReceiveMessage = (msg) => {
+      const uniqueKey = `${msg.senderId || "unknown"}-${msg.message}-${msg.timestamp}`;
+
+      // Skip duplicates
+      if (receivedMessages.has(uniqueKey)) return;
+
+      // Skip our own messages (already displayed locally)
+      if (String(msg.senderId) === String(user?.id)) return;
+
+      receivedMessages.add(uniqueKey);
+
+      // Attach formatted time
+      msg.formattedTime = formatTime(msg.timestamp);
+
       setMessages((prev) => [...prev, msg]);
     };
 
@@ -62,7 +83,6 @@ export default function Dashboard() {
       setFiles(incomingFiles);
     };
 
-    socket.on("connect", () => console.log("✅ Socket connected"));
     socket.on("receive-message", handleReceiveMessage);
     socket.on("receive-code", handleReceiveCode);
     socket.on("sync-files", handleSyncFiles);
@@ -71,10 +91,8 @@ export default function Dashboard() {
       socket.off("receive-message", handleReceiveMessage);
       socket.off("receive-code", handleReceiveCode);
       socket.off("sync-files", handleSyncFiles);
-      socket.off("connect");
-      socket.disconnect();
     };
-  }, [activeFile]);
+  }, [activeFile, user?.id]);
 
   useEffect(() => {
     chatRef.current?.scrollTo(0, chatRef.current.scrollHeight);
@@ -87,7 +105,7 @@ export default function Dashboard() {
       });
       setProjects(res.data);
     } catch (err) {
-      toast.error("Failed to fetch projects");
+      handleAxiosError(err);
     }
   };
 
@@ -96,9 +114,15 @@ export default function Dashboard() {
       const res = await axios.get(`http://localhost:5000/api/chat/${projectId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setMessages(res.data);
+
+      // Add formatted time for all messages
+      const msgs = res.data.map((m) => ({
+        ...m,
+        formattedTime: formatTime(m.timestamp),
+      }));
+      setMessages(msgs);
     } catch (err) {
-      toast.error("Failed to load chat history");
+      handleAxiosError(err);
     }
   };
 
@@ -117,86 +141,63 @@ export default function Dashboard() {
       setFiles(savedFiles);
       setActiveFile(savedFiles[0]?.name || "App.js");
 
-      socket.emit("join-room", { projectId: project._id, userId: user._id });
-      socket.emit("sync-files", { projectId: project._id, files: savedFiles });
+      const connectAndJoin = () => {
+        socket.emit("join-room", {
+          projectId: project._id,
+          userId: user.id,
+        });
+        setHasJoinedRoom(true);
+        socket.emit("sync-files", { projectId: project._id, files: savedFiles });
+      };
+
+      if (!socket.connected) {
+        socket.connect();
+        socket.once("connect", () => connectAndJoin());
+      } else {
+        connectAndJoin();
+      }
 
       toast.success(`Joined ${project.name}`);
       setActiveModal(null);
     } catch (err) {
-      toast.error("Failed to join project");
+      handleAxiosError(err);
     }
   };
 
   const sendMessage = async () => {
-    if (!input.trim() || !currentProject) return;
+    if (!input.trim() || !currentProject || !currentProject._id || !user?.id) {
+      return toast.error("Please join a project and write a message.");
+    }
 
-    const userMsg = input;
+    const userMsg = input.trim();
     setInput("");
 
+    const timestamp = new Date();
     const messageData = {
       projectId: currentProject._id,
       sender: "user",
-      senderId: user._id,
+      senderId: user.id,
+      senderName: user.name,
       message: userMsg,
-      timestamp: new Date(),
+      timestamp,
+      formattedTime: formatTime(timestamp), // Add time for UI
     };
 
+    const uniqueKey = `${messageData.senderId}-${messageData.message}-${messageData.timestamp}`;
+    receivedMessages.add(uniqueKey);
+
+    // Show locally
+    setMessages((prev) => [...prev, messageData]);
+
+    // Broadcast to others
     socket.emit("send-message", messageData);
 
     try {
       await axios.post("http://localhost:5000/api/chat", messageData, {
         headers: { Authorization: `Bearer ${token}` },
       });
-    } catch (err) {
-      console.error("Error saving message:", err);
-    }
-
-    if (userMsg.startsWith("@ai")) {
-      const prompt = userMsg.replace("@ai", "").trim();
-      if (!prompt) return toast.warn("Please write something after @ai");
-
-      setIsLoading(true);
-      setMessages((prev) => [
-        ...prev,
-        {
-          sender: "loading",
-          message: "🤖 AI is typing...",
-          timestamp: new Date(),
-        },
-      ]);
-
-      try {
-        const res = await axios.post(
-          "http://localhost:5000/api/ai/reply",
-          { prompt },
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-
-        const aiMessage = {
-          projectId: currentProject._id,
-          sender: "ai",
-          senderId: null,
-          message: `🤖 ${res.data.reply}`,
-          timestamp: new Date(),
-        };
-
-        socket.emit("send-message", aiMessage);
-
-        await axios.post("http://localhost:5000/api/chat", aiMessage, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        setMessages((prev) => [
-          ...prev.filter((msg) => msg.sender !== "loading"),
-          aiMessage,
-        ]);
-
-      } catch (err) {
-        toast.error("AI couldn't respond.");
-        setMessages((prev) => prev.filter((msg) => msg.sender !== "loading"));
-      } finally {
-        setIsLoading(false);
-      }
+    } catch {
+      toast.error("Message not saved.");
     }
   };
 
@@ -245,9 +246,9 @@ export default function Dashboard() {
         stdin,
       });
       const data = res.data;
-      setOutput(data.stdout || data.compile_output || data.stderr || data.message || "No output");
+      setOutput(data.stdout || data.compile_output || data.stderr || "No output");
       setExecutionStatus(data.status);
-    } catch (err) {
+    } catch {
       setOutput("Execution error");
       setExecutionStatus({ description: "Error" });
     }
@@ -255,32 +256,47 @@ export default function Dashboard() {
   };
 
   const handleLogout = () => {
+    if (socket.connected) socket.disconnect();
     localStorage.removeItem("token");
     toast.info("Logged out");
     navigate("/login");
   };
 
-  const toggleModal = (type) => {
-    setActiveModal((prev) => (prev === type ? null : type));
-  };
-
   const handleCreateProject = async (e) => {
     e.preventDefault();
     if (!projectName || !collaboratorEmail) {
-      toast.error("All fields required");
-      return;
+      return toast.error("All fields required");
     }
+
     try {
-      await api.post("/project/create", { name: projectName, collaboratorEmail }, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      await api.post(
+        "/project/create",
+        { name: projectName, collaboratorEmail },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
       toast.success("Project created");
       fetchProjects();
-      setActiveModal(null);
       setProjectName("");
       setCollaboratorEmail("");
+      setActiveModal(null);
     } catch (err) {
-      toast.error(err?.response?.data?.message || "Project creation failed");
+      handleAxiosError(err);
+    }
+  };
+
+  const handleAddCollaborator = async (projectId, email) => {
+    if (!email) return toast.error("Email required");
+
+    try {
+      await api.post(
+        "/project/add-collaborator",
+        { projectId, email },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success("Collaborator added");
+      fetchProjects();
+    } catch (err) {
+      handleAxiosError(err);
     }
   };
 
@@ -289,7 +305,6 @@ export default function Dashboard() {
       <ChatSection
         menuOpen={menuOpen}
         setMenuOpen={setMenuOpen}
-        toggleModal={toggleModal}
         activeModal={activeModal}
         setActiveModal={setActiveModal}
         handleLogout={handleLogout}
@@ -300,7 +315,7 @@ export default function Dashboard() {
         collaboratorEmail={collaboratorEmail}
         setCollaboratorEmail={setCollaboratorEmail}
         handleCreateProject={handleCreateProject}
-        handleAddCollaborator={handleCreateProject}
+        handleAddCollaborator={handleAddCollaborator}
         messages={messages}
         chatRef={chatRef}
         input={input}
