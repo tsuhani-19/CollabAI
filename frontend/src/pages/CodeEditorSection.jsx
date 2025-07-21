@@ -1,10 +1,19 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   FaPlay, FaFolder, FaFile, FaPlus, FaMagic, FaTrash,
   FaEdit, FaFileAlt, FaFolderPlus, FaClock
 } from "react-icons/fa";
 import axios from "axios";
 import { motion } from "framer-motion";
+import Confetti from "react-confetti"; // npm i react-confetti
+
+// Sparkle animation for new files/folders
+const Sparkle = () => (
+  <div className="absolute inset-0 pointer-events-none">
+    <div className="w-2 h-2 bg-pink-400 rounded-full animate-ping absolute top-1/2 left-1/2" />
+    <div className="w-1 h-1 bg-purple-400 rounded-full animate-pulse absolute top-1/3 left-2/3" />
+  </div>
+);
 
 export default function CodeEditorSection({
   files,
@@ -19,7 +28,6 @@ export default function CodeEditorSection({
   output,
   showOutput,
   setShowOutput,
-  handleAddItemToFiles,
   executionStatus,
   stdin,
   setStdin,
@@ -34,7 +42,19 @@ export default function CodeEditorSection({
   const [loading, setLoading] = useState(false);
   const [runningOutput, setRunningOutput] = useState("");
   const [showVersionModal, setShowVersionModal] = useState(false);
+  const [confettiActive, setConfettiActive] = useState(false);
 
+  // Auto-remove "NEW" badge after 5 seconds
+  useEffect(() => {
+    if (files.some(f => f.isNew)) {
+      const timer = setTimeout(() => {
+        setFiles(prev => prev.map(f => ({ ...f, isNew: false })));
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [files, setFiles]);
+
+  // Select a file to edit
   const handleSelectFile = (file) => {
     if (file.type === "file") {
       setActiveFile(file.name);
@@ -42,28 +62,49 @@ export default function CodeEditorSection({
     }
   };
 
+  // Rename file/folder
   const handleRename = (item) => {
     const newName = prompt("Enter new name:", item.name);
     if (!newName || newName === item.name) return;
-    const updatedFiles = files.map((f) =>
-      f.name === item.name ? { ...f, name: newName } : f
-    );
-    setFiles(updatedFiles);
-    socket?.emit("sync-files", { projectId: currentProjectId, files: updatedFiles });
-  };
-
-  const handleDelete = (item) => {
-    const updated = files.filter((f) => !f.name.startsWith(item.name));
+    const updated = files.map(f => f.name === item.name ? { ...f, name: newName } : f);
     setFiles(updated);
     socket?.emit("sync-files", { projectId: currentProjectId, files: updated });
   };
 
+  // Create new file or folder
+  const handleAddItemToFiles = (type = "file", parent = "") => {
+    const baseName = type === "file"
+      ? `Untitled-${Date.now()}.js`
+      : `NewFolder-${Date.now()}`;
+    const name = parent ? `${parent}${baseName}` : baseName;
+
+    const newItem = {
+      name,
+      type,
+      content: type === "file" ? "" : undefined,
+      isNew: true
+    };
+
+    const updatedFiles = [...files, newItem];
+    setFiles(updatedFiles);
+    socket?.emit("sync-files", { projectId: currentProjectId, files: updatedFiles });
+  };
+
+  // Delete file/folder
+  const handleDelete = (item) => {
+    const updated = files.filter(f => !f.name.startsWith(item.name));
+    setFiles(updated);
+    socket?.emit("sync-files", { projectId: currentProjectId, files: updated });
+  };
+
+  // Map extension → Judge0 language IDs
   const getLanguageId = (fileName) => {
     const ext = fileName?.split(".").pop();
     const map = { js: 63, py: 71, cpp: 54, c: 50, java: 62, php: 68, rb: 72, go: 60, cs: 51 };
     return map[ext] || 71;
   };
 
+  // Run code (via backend API)
   const handleRunCode = async () => {
     if (!activeFile || !code.trim()) {
       setShowOutput(true);
@@ -72,60 +113,71 @@ export default function CodeEditorSection({
     }
     const languageId = getLanguageId(activeFile);
     try {
-      const res = await axios.post("http://localhost:5000/api/run", {
-        code,
-        languageId,
-        stdin,
-      });
+      const res = await axios.post("http://localhost:5000/api/run", { code, languageId, stdin });
       const data = res.data;
       setShowOutput(true);
-      setRunningOutput(
-        data.stdout || data.compile_output || data.stderr || "No output"
-      );
+      setRunningOutput(data.stdout || data.compile_output || data.stderr || "No output");
     } catch {
       setShowOutput(true);
       setRunningOutput("Execution error");
     }
   };
 
+  // Live preview (HTML files)
   const handleOpenLivePreview = async () => {
     const projectName = currentProjectId || "live-preview-temp";
     try {
       let projectFiles = files;
       if (!files.some(f => f.name.toLowerCase().includes("index.html"))) {
-        projectFiles = [...files, { name: "index.html", type: "file", content: "<h1>Hello World</h1>" }];
+        projectFiles = [...files, { name: "index.html", type: "file", content: "<h1>Hello World</h1>", isNew: true }];
         setFiles(projectFiles);
       }
-      await axios.post("http://localhost:5000/api/save-project", {
-        projectName,
-        files: projectFiles,
-      });
+      await axios.post("http://localhost:5000/api/save-project", { projectName, files: projectFiles });
       window.open(`http://localhost:5000/sites/${projectName}/index.html`, "_blank");
     } catch {
       alert("Failed to save and open live preview.");
     }
   };
 
+  // Recursive file explorer
   const renderExplorer = (parent = "") => {
     return files
-      .filter((f) => f.name.startsWith(parent) && f.name.replace(parent, "").split("/").length === 1)
-      .map((item) => (
-        <li key={item.name} className="group">
+      .filter(f => f.name.startsWith(parent) && f.name.replace(parent, "").split("/").length === 1)
+      .map(item => (
+        <motion.li
+          key={item.name}
+          initial={item.isNew ? { scale: 0.7, opacity: 0 } : {}}
+          animate={item.isNew ? { scale: 1, opacity: 1 } : {}}
+          transition={{ type: "spring", stiffness: 150, damping: 12 }}
+          className="group relative"
+        >
           <div
             className={`flex justify-between items-center gap-2 cursor-pointer px-2 py-1 rounded-md hover:bg-purple-500/20 ${
-              activeFile === item.name ? "bg-purple-600/30" : ""
-            }`}
+              item.isNew ? "shadow-[0_0_15px_#ec4899]" : ""
+            } ${activeFile === item.name ? "bg-purple-600/30" : ""}`}
             onClick={() => handleSelectFile(item)}
           >
-            <span className="flex items-center gap-2">
+            <span className="flex items-center gap-2 relative">
               {item.type === "file" ? <FaFileAlt /> : <FaFolder />}
               {item.name.split("/").pop()}
+              {item.isNew && (
+                <>
+                  <span className="ml-2 text-xs text-pink-400 animate-pulse">NEW</span>
+                  <Sparkle />
+                </>
+              )}
             </span>
             <span className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
-              <button onClick={(e) => { e.stopPropagation(); handleRename(item); }}><FaEdit className="text-yellow-400 hover:scale-110" /></button>
-              <button onClick={(e) => { e.stopPropagation(); handleDelete(item); }}><FaTrash className="text-red-400 hover:scale-110" /></button>
+              <button onClick={(e) => { e.stopPropagation(); handleRename(item); }}>
+                <FaEdit className="text-yellow-400 hover:scale-110" />
+              </button>
+              <button onClick={(e) => { e.stopPropagation(); handleDelete(item); }}>
+                <FaTrash className="text-red-400 hover:scale-110" />
+              </button>
               {item.type === "folder" && (
-                <button onClick={(e) => { e.stopPropagation(); handleAddItemToFiles(); }}><FaPlus className="text-green-400 hover:scale-110" /></button>
+                <button onClick={(e) => { e.stopPropagation(); handleAddItemToFiles("file", item.name + "/"); }}>
+                  <FaPlus className="text-green-400 hover:scale-110" />
+                </button>
               )}
             </span>
           </div>
@@ -134,26 +186,28 @@ export default function CodeEditorSection({
               {renderExplorer(item.name + "/")}
             </ul>
           )}
-        </li>
+        </motion.li>
       ));
   };
 
+  // AI Website generation
   const handleGenerateAIProject = async () => {
     if (!userPrompt.trim()) return alert("Please enter a valid description.");
     setLoading(true);
     try {
-      const res = await axios.post("http://localhost:5000/api/generate-website", {
-        userGoal: userPrompt,
-      });
+      const res = await axios.post("http://localhost:5000/api/generate-website", { userGoal: userPrompt });
       const generated = res.data;
-      const newFiles = generated.files.map((file) => ({
+      const newFiles = generated.files.map(file => ({
         name: file.path,
         type: "file",
         content: file.content,
+        isNew: true
       }));
       setFiles(newFiles);
       setActiveFile(newFiles[0]?.name || "");
       setCode(newFiles[0]?.content || "");
+      setConfettiActive(true);
+      setTimeout(() => setConfettiActive(false), 4000);
       socket?.emit("sync-files", { projectId: currentProjectId, files: newFiles });
       setShowPromptModal(false);
       setUserPrompt("");
@@ -164,6 +218,7 @@ export default function CodeEditorSection({
     }
   };
 
+  // Version history
   const handleOpenVersionHistory = async () => {
     await fetchVersionHistory(currentProjectId);
     setShowVersionModal(true);
@@ -171,6 +226,8 @@ export default function CodeEditorSection({
 
   return (
     <div className="flex flex-col w-full h-full text-white font-mono bg-gradient-to-br from-[#05010e] via-[#0d0120] to-[#05010e] relative overflow-hidden">
+      {confettiActive && <Confetti width={window.innerWidth} height={window.innerHeight} recycle={false} />}
+
       {/* Glowing background blobs */}
       <div className="absolute -top-40 left-20 w-[400px] h-[400px] rounded-full bg-purple-700/30 blur-[150px] animate-pulse" />
       <div className="absolute -bottom-40 right-20 w-[400px] h-[400px] rounded-full bg-pink-700/30 blur-[150px] animate-pulse delay-200" />
@@ -204,8 +261,8 @@ export default function CodeEditorSection({
             <span className="flex items-center gap-2 text-sm font-semibold"><FaFolder /> Explorer</span>
             <div className="flex gap-2">
               <button onClick={() => setShowPromptModal(true)} title="AI" className="hover:scale-110"><FaMagic /></button>
-              <button onClick={() => handleAddItemToFiles()} className="hover:scale-110"><FaFile /></button>
-              <button onClick={() => handleAddItemToFiles()} className="hover:scale-110"><FaFolderPlus /></button>
+              <button onClick={() => handleAddItemToFiles("file")} className="hover:scale-110"><FaFile /></button>
+              <button onClick={() => handleAddItemToFiles("folder")} className="hover:scale-110"><FaFolderPlus /></button>
             </div>
           </div>
           <ul className="text-xs space-y-1 text-gray-300">
@@ -227,9 +284,7 @@ export default function CodeEditorSection({
               placeholder="Write your code here..."
             />
             <div className="p-3 flex justify-between items-center border-t border-purple-500/30 text-xs text-gray-400">
-              <div>
-                {typingUser ? `${typingUser} is typing...` : `${onlineUsers?.length || 0} users online`}
-              </div>
+              <div>{typingUser ? `${typingUser} is typing...` : `${onlineUsers?.length || 0} users online`}</div>
               <div className="flex gap-2">
                 <motion.button
                   whileHover={{ scale: 1.05, boxShadow: "0 0 15px #22c55e" }}
@@ -259,7 +314,7 @@ export default function CodeEditorSection({
         </div>
       </div>
 
-      {/* Modals (Version + AI Generator) */}
+      {/* Version Modal */}
       {showVersionModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex justify-center items-center z-50">
           <motion.div
@@ -272,7 +327,7 @@ export default function CodeEditorSection({
               <p className="text-gray-400">No versions available yet.</p>
             ) : (
               <ul className="space-y-3">
-                {versionHistory.map((version) => (
+                {versionHistory.map(version => (
                   <li key={version._id} className="flex justify-between items-center text-sm bg-purple-900/30 p-3 rounded-lg">
                     <span>{new Date(version.createdAt).toLocaleString()}</span>
                     <button
@@ -286,17 +341,13 @@ export default function CodeEditorSection({
               </ul>
             )}
             <div className="mt-4 flex justify-end">
-              <button
-                onClick={() => setShowVersionModal(false)}
-                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded"
-              >
-                Close
-              </button>
+              <button onClick={() => setShowVersionModal(false)} className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded">Close</button>
             </div>
           </motion.div>
         </div>
       )}
 
+      {/* AI Prompt Modal */}
       {showPromptModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex justify-center items-center z-50">
           <motion.div

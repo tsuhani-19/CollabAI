@@ -25,8 +25,27 @@ mongoose
   .then(() => console.log("✅ MongoDB connected"))
   .catch((err) => console.log("❌ DB error:", err));
 
-// Middlewares
-app.use(cors({ origin: "http://localhost:5173", credentials: true }));
+
+
+const allowedOrigins = [
+  "http://localhost:5173", 
+  "https://collab-ai-git-main-tsuhani-19s-projects.vercel.app",  // Vercel frontend URL
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("CORS not allowed"));
+    }
+  },
+  credentials: true
+}));
+
+
+
+
 app.use(express.json());
 
 // API Routes
