@@ -1,9 +1,10 @@
 import React, { useState } from "react";
 import {
   FaPlay, FaFolder, FaFile, FaPlus, FaMagic, FaTrash,
-  FaEdit, FaFileAlt, FaFolderPlus, FaTerminal
+  FaEdit, FaFileAlt, FaFolderPlus, FaClock
 } from "react-icons/fa";
 import axios from "axios";
+import { motion } from "framer-motion";
 
 export default function CodeEditorSection({
   files,
@@ -15,37 +16,30 @@ export default function CodeEditorSection({
   handleCodeChange,
   socket,
   currentProjectId,
+  output,
+  showOutput,
+  setShowOutput,
+  handleAddItemToFiles,
+  executionStatus,
+  stdin,
+  setStdin,
+  versionHistory,
+  fetchVersionHistory,
+  rollbackToVersion,
+  typingUser,
+  onlineUsers
 }) {
   const [showPromptModal, setShowPromptModal] = useState(false);
   const [userPrompt, setUserPrompt] = useState("");
   const [loading, setLoading] = useState(false);
-  const [showTerminal, setShowTerminal] = useState(false);
-  const [output, setOutput] = useState("");
+  const [runningOutput, setRunningOutput] = useState("");
+  const [showVersionModal, setShowVersionModal] = useState(false);
 
   const handleSelectFile = (file) => {
     if (file.type === "file") {
       setActiveFile(file.name);
       setCode(file.content || "");
     }
-  };
-
-  const handleAddFileOrFolder = (isFolder = false, parent = null) => {
-    const name = prompt(`Enter ${isFolder ? "folder" : "file"} name:`);
-    if (!name) return;
-    const fullName = parent ? `${parent}/${name}` : name;
-    const exists = files.some((f) => f.name === fullName);
-    if (exists) return alert("Item already exists");
-
-    const newItem = {
-      name: fullName,
-      type: isFolder ? "folder" : "file",
-      content: isFolder ? null : "",
-    };
-
-    const updated = [...files, newItem];
-    setFiles(updated);
-    if (socket && currentProjectId)
-      socket.emit("sync-files", { projectId: currentProjectId, files: updated });
   };
 
   const handleRename = (item) => {
@@ -55,50 +49,60 @@ export default function CodeEditorSection({
       f.name === item.name ? { ...f, name: newName } : f
     );
     setFiles(updatedFiles);
-    if (socket && currentProjectId)
-      socket.emit("sync-files", { projectId: currentProjectId, files: updatedFiles });
+    socket?.emit("sync-files", { projectId: currentProjectId, files: updatedFiles });
   };
 
   const handleDelete = (item) => {
     const updated = files.filter((f) => !f.name.startsWith(item.name));
     setFiles(updated);
-    if (socket && currentProjectId)
-      socket.emit("sync-files", { projectId: currentProjectId, files: updated });
+    socket?.emit("sync-files", { projectId: currentProjectId, files: updated });
   };
 
   const getLanguageId = (fileName) => {
-    if (!fileName) return 71;
-    const ext = fileName.split(".").pop();
-    const map = {
-      js: 63,
-      py: 71,
-      cpp: 54,
-      c: 50,
-      java: 62,
-      php: 68,
-      rb: 72,
-      go: 60,
-      cs: 51,
-    };
+    const ext = fileName?.split(".").pop();
+    const map = { js: 63, py: 71, cpp: 54, c: 50, java: 62, php: 68, rb: 72, go: 60, cs: 51 };
     return map[ext] || 71;
   };
 
   const handleRunCode = async () => {
+    if (!activeFile || !code.trim()) {
+      setShowOutput(true);
+      setRunningOutput("⚠️ Write some code before running.");
+      return;
+    }
     const languageId = getLanguageId(activeFile);
     try {
       const res = await axios.post("http://localhost:5000/api/run", {
         code,
         languageId,
-        stdin: "",
+        stdin,
       });
+      const data = res.data;
+      setShowOutput(true);
+      setRunningOutput(
+        data.stdout || data.compile_output || data.stderr || "No output"
+      );
+    } catch {
+      setShowOutput(true);
+      setRunningOutput("Execution error");
+    }
+  };
 
-      const { stdout, stderr, compile_output, message } = res.data;
-      const finalOutput = stdout || compile_output || stderr || message || "No output";
-      setOutput(finalOutput);
-      setShowTerminal(true);
-    } catch (err) {
-      setOutput("❌ Code run failed: " + (err.response?.data?.error || err.message));
-      setShowTerminal(true);
+  const handleOpenLivePreview = async () => {
+    const projectName = currentProjectId || "live-preview-temp";
+    try {
+      let projectFiles = files;
+      if (!files.some(f => f.name.toLowerCase().includes("index.html"))) {
+        projectFiles = [...files, { name: "index.html", type: "file", content: "<h1>Hello World</h1>" }];
+        setFiles(projectFiles);
+      }
+      await axios.post("http://localhost:5000/api/save-project", {
+        projectName,
+        files: projectFiles,
+      });
+      window.open(`http://localhost:5000/sites/${projectName}/index.html`, "_blank");
+    } catch {
+      alert("Failed to save and open live preview.");
     }
   };
 
@@ -108,7 +112,9 @@ export default function CodeEditorSection({
       .map((item) => (
         <li key={item.name} className="group">
           <div
-            className={`flex justify-between items-center gap-2 cursor-pointer px-2 py-1 rounded-md hover:bg-[#2c2f4a] ${activeFile === item.name ? "bg-[#374151]" : ""}`}
+            className={`flex justify-between items-center gap-2 cursor-pointer px-2 py-1 rounded-md hover:bg-purple-500/20 ${
+              activeFile === item.name ? "bg-purple-600/30" : ""
+            }`}
             onClick={() => handleSelectFile(item)}
           >
             <span className="flex items-center gap-2">
@@ -116,15 +122,15 @@ export default function CodeEditorSection({
               {item.name.split("/").pop()}
             </span>
             <span className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
-              <button onClick={(e) => { e.stopPropagation(); handleRename(item); }}><FaEdit className="text-yellow-400" /></button>
-              <button onClick={(e) => { e.stopPropagation(); handleDelete(item); }}><FaTrash className="text-red-400" /></button>
+              <button onClick={(e) => { e.stopPropagation(); handleRename(item); }}><FaEdit className="text-yellow-400 hover:scale-110" /></button>
+              <button onClick={(e) => { e.stopPropagation(); handleDelete(item); }}><FaTrash className="text-red-400 hover:scale-110" /></button>
               {item.type === "folder" && (
-                <button onClick={(e) => { e.stopPropagation(); handleAddFileOrFolder(false, item.name); }}><FaPlus className="text-green-400" /></button>
+                <button onClick={(e) => { e.stopPropagation(); handleAddItemToFiles(); }}><FaPlus className="text-green-400 hover:scale-110" /></button>
               )}
             </span>
           </div>
           {item.type === "folder" && (
-            <ul className="ml-4 border-l border-gray-600 pl-2">
+            <ul className="ml-4 border-l border-purple-400/30 pl-2">
               {renderExplorer(item.name + "/")}
             </ul>
           )}
@@ -135,9 +141,10 @@ export default function CodeEditorSection({
   const handleGenerateAIProject = async () => {
     if (!userPrompt.trim()) return alert("Please enter a valid description.");
     setLoading(true);
-
     try {
-      const res = await axios.post("http://localhost:5000/api/generate-website", { userGoal: userPrompt });
+      const res = await axios.post("http://localhost:5000/api/generate-website", {
+        userGoal: userPrompt,
+      });
       const generated = res.data;
       const newFiles = generated.files.map((file) => ({
         name: file.path,
@@ -147,105 +154,177 @@ export default function CodeEditorSection({
       setFiles(newFiles);
       setActiveFile(newFiles[0]?.name || "");
       setCode(newFiles[0]?.content || "");
-      if (currentProjectId && socket)
-        socket.emit("sync-files", { projectId: currentProjectId, files: newFiles });
+      socket?.emit("sync-files", { projectId: currentProjectId, files: newFiles });
       setShowPromptModal(false);
       setUserPrompt("");
-    } catch (err) {
+    } catch {
       alert("Failed to generate website from AI.");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleOpenLivePreview = async () => {
-    const projectName = currentProjectId || "my-live-preview";
-    try {
-      await axios.post("http://localhost:5000/api/save-project", { projectName, files });
-      window.open(`http://localhost:5000/sites/${projectName}/index.html`, "_blank");
-    } catch (err) {
-      alert("Failed to save and open live preview.");
-    }
+  const handleOpenVersionHistory = async () => {
+    await fetchVersionHistory(currentProjectId);
+    setShowVersionModal(true);
   };
 
   return (
-    <div className="flex flex-col w-full h-full bg-gradient-to-br from-[#111827] via-black to-[#0f172a] text-white font-mono">
-      {/* Explorer Tabs */}
-      <div className="flex bg-[#1f2937] px-4 py-2 border-b border-gray-700 space-x-2 text-sm">
-        {files.filter(f => f.type === "file").map(f => (
-          <div
-            key={f.name}
-            onClick={() => handleSelectFile(f)}
-            className={`px-3 py-1 rounded-t cursor-pointer ${activeFile === f.name ? "bg-[#374151]" : "hover:bg-[#2c2f4a]"}`}
-          >{f.name.split("/").pop()}</div>
-        ))}
+    <div className="flex flex-col w-full h-full text-white font-mono bg-gradient-to-br from-[#05010e] via-[#0d0120] to-[#05010e] relative overflow-hidden">
+      {/* Glowing background blobs */}
+      <div className="absolute -top-40 left-20 w-[400px] h-[400px] rounded-full bg-purple-700/30 blur-[150px] animate-pulse" />
+      <div className="absolute -bottom-40 right-20 w-[400px] h-[400px] rounded-full bg-pink-700/30 blur-[150px] animate-pulse delay-200" />
+
+      {/* Tabs */}
+      <div className="flex px-4 py-2 border-b border-purple-500/40 bg-black/40 backdrop-blur-lg text-sm justify-between shadow-[0_0_15px_rgba(147,51,234,0.3)]">
+        <div className="flex space-x-2">
+          {files.filter(f => f.type === "file").map(f => (
+            <div
+              key={f.name}
+              onClick={() => handleSelectFile(f)}
+              className={`px-3 py-1 rounded-t cursor-pointer transition-all ${
+                activeFile === f.name
+                  ? "bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-[0_0_10px_rgba(236,72,153,0.5)]"
+                  : "hover:bg-purple-600/30 text-gray-300"
+              }`}
+            >
+              {f.name.split("/").pop()}
+            </div>
+          ))}
+        </div>
+        <button onClick={handleOpenVersionHistory} className="flex items-center gap-1 text-xs text-gray-400 hover:text-white">
+          <FaClock /> Versions
+        </button>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* File Explorer */}
-        <div className="w-[240px] bg-[#1e293b] p-3 border-r border-gray-700">
-          <div className="flex justify-between items-center mb-2">
+        {/* Explorer */}
+        <div className="w-[240px] bg-black/40 backdrop-blur-xl p-3 border-r border-purple-500/30 shadow-[0_0_10px_rgba(147,51,234,0.3)]">
+          <div className="flex justify-between items-center mb-2 text-purple-300">
             <span className="flex items-center gap-2 text-sm font-semibold"><FaFolder /> Explorer</span>
             <div className="flex gap-2">
-              <button onClick={() => setShowPromptModal(true)} title="AI" className="text-purple-400"><FaMagic /></button>
-              <button onClick={() => handleAddFileOrFolder(false)} className="text-green-400"><FaFile /></button>
-              <button onClick={() => handleAddFileOrFolder(true)} className="text-yellow-400"><FaFolderPlus /></button>
+              <button onClick={() => setShowPromptModal(true)} title="AI" className="hover:scale-110"><FaMagic /></button>
+              <button onClick={() => handleAddItemToFiles()} className="hover:scale-110"><FaFile /></button>
+              <button onClick={() => handleAddItemToFiles()} className="hover:scale-110"><FaFolderPlus /></button>
             </div>
           </div>
-          <ul className="text-xs space-y-1">
+          <ul className="text-xs space-y-1 text-gray-300">
             {renderExplorer()}
           </ul>
         </div>
 
         {/* Code Editor */}
-        <div className="flex-1 p-4 bg-[#0f172a] overflow-auto">
-          <div className="flex flex-col bg-[#1f2937] h-full rounded-xl shadow-xl border border-gray-700">
+        <div className="flex-1 p-4">
+          <div className="flex flex-col bg-black/40 backdrop-blur-lg h-full rounded-xl border border-purple-500/30 shadow-[0_0_25px_rgba(147,51,234,0.3)]">
             <textarea
               value={code}
-              onChange={handleCodeChange}
-              className="w-full flex-1 p-4 bg-[#0f172a] text-white text-sm rounded-t-xl resize-none outline-none focus:ring-2 focus:ring-blue-500"
+              onChange={(e) => {
+                handleCodeChange(e);
+                socket?.emit("typing", { projectId: currentProjectId, userName: "Someone" });
+              }}
+              onBlur={() => socket?.emit("stop-typing", { projectId: currentProjectId })}
+              className="w-full flex-1 p-4 bg-transparent text-white text-sm rounded-t-xl resize-none outline-none focus:ring-2 focus:ring-pink-500"
               placeholder="Write your code here..."
             />
-            <div className="p-3 flex justify-between items-center border-t border-gray-700">
-              <div className="text-xs text-gray-400 cursor-pointer flex items-center gap-2" onClick={() => setShowTerminal(!showTerminal)}>
-                <FaTerminal /> Terminal
+            <div className="p-3 flex justify-between items-center border-t border-purple-500/30 text-xs text-gray-400">
+              <div>
+                {typingUser ? `${typingUser} is typing...` : `${onlineUsers?.length || 0} users online`}
               </div>
               <div className="flex gap-2">
-                <button onClick={handleRunCode} className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg flex items-center gap-2 text-sm">
+                <motion.button
+                  whileHover={{ scale: 1.05, boxShadow: "0 0 15px #22c55e" }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={handleRunCode}
+                  className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg flex items-center gap-2 text-sm"
+                >
                   <FaPlay /> Run
-                </button>
-                <button onClick={handleOpenLivePreview} className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm">
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.05, boxShadow: "0 0 15px #3b82f6" }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={handleOpenLivePreview}
+                  className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm"
+                >
                   🌐 Live Preview
-                </button>
+                </motion.button>
               </div>
             </div>
-            {showTerminal && (
-              <div className="bg-black text-green-400 text-xs font-mono p-3 h-[150px] overflow-y-auto border-t border-gray-700">
-                {output || "No output yet..."}
+            {showOutput && (
+              <div className="bg-black/70 text-green-400 text-xs font-mono p-3 h-[150px] overflow-y-auto border-t border-purple-500/30">
+                {runningOutput || output || "No output yet..."}
+                {executionStatus?.description ? `\nStatus: ${executionStatus.description}` : ""}
               </div>
             )}
           </div>
         </div>
       </div>
 
+      {/* Modals (Version + AI Generator) */}
+      {showVersionModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex justify-center items-center z-50">
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-black/60 backdrop-blur-xl p-6 rounded-xl w-[500px] max-h-[400px] overflow-y-auto border border-purple-500/40 shadow-[0_0_30px_rgba(236,72,153,0.4)]"
+          >
+            <h2 className="text-lg font-bold mb-4 text-purple-300">Version History</h2>
+            {versionHistory.length === 0 ? (
+              <p className="text-gray-400">No versions available yet.</p>
+            ) : (
+              <ul className="space-y-3">
+                {versionHistory.map((version) => (
+                  <li key={version._id} className="flex justify-between items-center text-sm bg-purple-900/30 p-3 rounded-lg">
+                    <span>{new Date(version.createdAt).toLocaleString()}</span>
+                    <button
+                      onClick={() => rollbackToVersion(version._id)}
+                      className="bg-gradient-to-r from-purple-500 to-pink-500 hover:scale-105 px-3 py-1 rounded text-white text-xs"
+                    >
+                      Rollback
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="mt-4 flex justify-end">
+              <button
+                onClick={() => setShowVersionModal(false)}
+                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded"
+              >
+                Close
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
       {showPromptModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center">
-          <div className="bg-[#1f2937] p-6 rounded-xl w-[480px] shadow-xl border border-gray-700 text-white">
-            <h2 className="text-lg font-bold mb-3">⚡ Generate Website with AI</h2>
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex justify-center items-center z-50">
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-black/60 backdrop-blur-xl p-6 rounded-xl w-[480px] border border-purple-500/40 shadow-[0_0_30px_rgba(236,72,153,0.4)] text-white"
+          >
+            <h2 className="text-lg font-bold mb-3 text-purple-300">⚡ Generate Website with AI</h2>
             <textarea
               rows={4}
               value={userPrompt}
               onChange={(e) => setUserPrompt(e.target.value)}
-              className="w-full p-3 rounded bg-[#0f172a] border border-gray-600 text-sm font-mono"
+              className="w-full p-3 rounded bg-transparent border border-purple-500 text-sm font-mono focus:ring-2 focus:ring-pink-400"
               placeholder="Describe the website you want to build..."
             />
             <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => setShowPromptModal(false)} className="px-4 py-2 bg-gray-600 rounded hover:bg-gray-700">Cancel</button>
-              <button onClick={handleGenerateAIProject} disabled={loading} className="px-4 py-2 bg-purple-600 rounded hover:bg-purple-700 flex items-center gap-2">
+              <button onClick={() => setShowPromptModal(false)} className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded">Cancel</button>
+              <motion.button
+                whileHover={{ scale: 1.05, boxShadow: "0 0 15px #9333ea" }}
+                whileTap={{ scale: 0.9 }}
+                onClick={handleGenerateAIProject}
+                disabled={loading}
+                className="px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 rounded flex items-center gap-2"
+              >
                 {loading ? "Generating..." : "Generate"}
-              </button>
+              </motion.button>
             </div>
-          </div>
+          </motion.div>
         </div>
       )}
     </div>

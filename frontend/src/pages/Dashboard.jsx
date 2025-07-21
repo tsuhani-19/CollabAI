@@ -12,11 +12,10 @@ import { useUser } from "../context/UserContext";
 const languageMap = { js: 63, py: 71, cpp: 54, c: 50, java: 62 };
 
 const getLanguageIdFromFile = (filename) => {
-  const ext = filename.split(".").pop().toLowerCase();
+  const ext = filename?.split(".").pop().toLowerCase();
   return languageMap[ext] || 71;
 };
 
-// To avoid duplicate messages
 const receivedMessages = new Set();
 
 export default function Dashboard() {
@@ -42,35 +41,32 @@ export default function Dashboard() {
   const [stdin, setStdin] = useState("");
   const [hasJoinedRoom, setHasJoinedRoom] = useState(false);
 
+  const [onlineUsers, setOnlineUsers] = useState([]);
+  const [typingUser, setTypingUser] = useState(null);
+  const [versionHistory, setVersionHistory] = useState([]);
+
   const chatRef = useRef();
+  const saveTimer = useRef(null);
 
   const handleAxiosError = (err) => {
     toast.error(err?.response?.data?.message || "Something went wrong");
   };
 
-  // Format timestamp to show HH:MM AM/PM
   const formatTime = (dateString) => {
     const date = new Date(dateString);
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
 
+  // SOCKET CONNECTION
   useEffect(() => {
     fetchProjects();
 
     const handleReceiveMessage = (msg) => {
       const uniqueKey = `${msg.senderId || "unknown"}-${msg.message}-${msg.timestamp}`;
-
-      // Skip duplicates
       if (receivedMessages.has(uniqueKey)) return;
-
-      // Skip our own messages (already displayed locally)
       if (String(msg.senderId) === String(user?.id)) return;
-
       receivedMessages.add(uniqueKey);
-
-      // Attach formatted time
       msg.formattedTime = formatTime(msg.timestamp);
-
       setMessages((prev) => [...prev, msg]);
     };
 
@@ -83,6 +79,12 @@ export default function Dashboard() {
       setFiles(incomingFiles);
     };
 
+    socket.on("update-online-users", (users) => setOnlineUsers(users || []));
+    socket.on("show-typing", (userName) => {
+      if (userName !== user?.name) setTypingUser(userName);
+    });
+    socket.on("hide-typing", () => setTypingUser(null));
+
     socket.on("receive-message", handleReceiveMessage);
     socket.on("receive-code", handleReceiveCode);
     socket.on("sync-files", handleSyncFiles);
@@ -91,12 +93,45 @@ export default function Dashboard() {
       socket.off("receive-message", handleReceiveMessage);
       socket.off("receive-code", handleReceiveCode);
       socket.off("sync-files", handleSyncFiles);
+      socket.off("update-online-users");
+      socket.off("show-typing");
+      socket.off("hide-typing");
     };
   }, [activeFile, user?.id]);
 
   useEffect(() => {
     chatRef.current?.scrollTo(0, chatRef.current.scrollHeight);
   }, [messages]);
+
+  // --- AUTO-SAVE FIXED ---
+  useEffect(() => {
+    if (!currentProject?._id || (!code.trim() && files.length === 0)) return;
+
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      try {
+        await axios.post(
+          "http://localhost:5000/api/project/save-version",
+          {
+            projectId: currentProject._id,
+            files,
+            activeFile,
+            code,
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${token}`, // <-- TOKEN ADDED HERE
+            },
+          }
+        );
+        console.log("Auto-saved version");
+      } catch (err) {
+        console.error("Auto-save failed", err);
+      }
+    }, 8000);
+
+    return () => clearTimeout(saveTimer.current);
+  }, [code, files, activeFile, currentProject?._id, token]);
 
   const fetchProjects = async () => {
     try {
@@ -114,8 +149,6 @@ export default function Dashboard() {
       const res = await axios.get(`http://localhost:5000/api/chat/${projectId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-
-      // Add formatted time for all messages
       const msgs = res.data.map((m) => ({
         ...m,
         formattedTime: formatTime(m.timestamp),
@@ -126,10 +159,43 @@ export default function Dashboard() {
     }
   };
 
+  const fetchVersionHistory = async (projectId) => {
+    if (!projectId) return;
+    try {
+      const res = await axios.get(`http://localhost:5000/api/project/${projectId}/history`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setVersionHistory(res.data || []);
+    } catch {
+      toast.error("Failed to load version history");
+    }
+  };
+
+  const rollbackToVersion = async (versionId) => {
+    if (!currentProject?._id) return;
+    try {
+      const res = await axios.post(
+        `http://localhost:5000/api/project/rollback/${versionId}`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.data?.file) {
+        const { fileName, content } = res.data.file;
+        updateFileContent(fileName, content);
+        setCode(content);
+        toast.success("Rolled back successfully");
+      }
+      fetchVersionHistory(currentProject._id);
+    } catch {
+      toast.error("Rollback failed");
+    }
+  };
+
   const handleJoinProject = async (project) => {
     try {
       setCurrentProject(project);
       await loadChatHistory(project._id);
+      await fetchVersionHistory(project._id);
 
       const res = await axios.get(`http://localhost:5000/api/project/${project._id}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -142,9 +208,11 @@ export default function Dashboard() {
       setActiveFile(savedFiles[0]?.name || "App.js");
 
       const connectAndJoin = () => {
+        if (!user || !user.id) return;
         socket.emit("join-room", {
           projectId: project._id,
           userId: user.id,
+          userName: user.name,
         });
         setHasJoinedRoom(true);
         socket.emit("sync-files", { projectId: project._id, files: savedFiles });
@@ -165,7 +233,7 @@ export default function Dashboard() {
   };
 
   const sendMessage = async () => {
-    if (!input.trim() || !currentProject || !currentProject._id || !user?.id) {
+    if (!input.trim() || !currentProject?._id || !user?.id) {
       return toast.error("Please join a project and write a message.");
     }
 
@@ -180,16 +248,12 @@ export default function Dashboard() {
       senderName: user.name,
       message: userMsg,
       timestamp,
-      formattedTime: formatTime(timestamp), // Add time for UI
+      formattedTime: formatTime(timestamp),
     };
 
     const uniqueKey = `${messageData.senderId}-${messageData.message}-${messageData.timestamp}`;
     receivedMessages.add(uniqueKey);
-
-    // Show locally
     setMessages((prev) => [...prev, messageData]);
-
-    // Broadcast to others
     socket.emit("send-message", messageData);
 
     try {
@@ -201,12 +265,24 @@ export default function Dashboard() {
     }
   };
 
+  const handleTyping = () => {
+    if (currentProject?._id && user?.name) {
+      socket.emit("typing", { projectId: currentProject._id, userName: user.name });
+    }
+  };
+
+  const handleStopTyping = () => {
+    if (currentProject?._id && user?.name) {
+      socket.emit("stop-typing", { projectId: currentProject._id, userName: user.name });
+    }
+  };
+
   const handleCodeChange = (e) => {
     const newCode = e.target.value;
     setCode(newCode);
     updateFileContent(activeFile, newCode);
 
-    if (currentProject) {
+    if (currentProject?._id) {
       socket.emit("code-change", { projectId: currentProject._id, code: newCode });
       socket.emit("sync-files", { projectId: currentProject._id, files });
     }
@@ -227,7 +303,7 @@ export default function Dashboard() {
     const updated = [...files, newItem];
     setFiles(updated);
 
-    if (currentProject) {
+    if (currentProject?._id) {
       socket.emit("sync-files", { projectId: currentProject._id, files: updated });
     }
 
@@ -238,6 +314,7 @@ export default function Dashboard() {
   };
 
   const handleRunCode = async () => {
+    if (!code.trim()) return toast.error("Write some code before running!");
     const languageId = getLanguageIdFromFile(activeFile);
     try {
       const res = await axios.post("http://localhost:5000/api/run", {
@@ -322,6 +399,10 @@ export default function Dashboard() {
         setInput={setInput}
         sendMessage={sendMessage}
         isLoading={isLoading}
+        typingUser={typingUser}
+        onlineUsers={onlineUsers}
+        onTyping={handleTyping}
+        onStopTyping={handleStopTyping}
       />
 
       <CodeEditorSection
@@ -337,11 +418,16 @@ export default function Dashboard() {
         showOutput={showOutput}
         setShowOutput={setShowOutput}
         socket={socket}
-        currentProjectId={currentProject?._id}
+        currentProjectId={currentProject?._id || null}
         handleAddItemToFiles={handleAddItemToFiles}
         executionStatus={executionStatus}
         stdin={stdin}
         setStdin={setStdin}
+        versionHistory={versionHistory}
+        fetchVersionHistory={() => fetchVersionHistory(currentProject?._id)}
+        rollbackToVersion={rollbackToVersion}
+        typingUser={typingUser}
+        onlineUsers={onlineUsers}
       />
     </div>
   );

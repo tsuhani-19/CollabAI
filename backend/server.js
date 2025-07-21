@@ -11,6 +11,7 @@ const chatRoutes = require("./routes/chatRoutes.js");
 const runRoute = require("./routes/runRoutes.js");
 const websiteBuilderRoutes = require("./routes/websiteBuilder.js");
 const saveProjectRoute = require("./routes/saveRoutes.js");
+const versionRoutes = require("./routes/versionRoutes.js");
 
 const app = express();
 const server = http.createServer(app);
@@ -35,6 +36,9 @@ app.use("/api/chat", chatRoutes);
 app.use("/api/run", runRoute);
 app.use("/api/generate-website", websiteBuilderRoutes);
 app.use("/api/save-project", saveProjectRoute);
+
+app.use("/api/version", versionRoutes);
+
 
 // ✅ Serve static preview from disk (important!)
 const path = require("path");

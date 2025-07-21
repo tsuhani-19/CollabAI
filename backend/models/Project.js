@@ -6,7 +6,7 @@ const FileSchema = new mongoose.Schema(
     name: { type: String, required: true },
     type: { type: String, enum: ["file", "folder"], default: "file" },
     content: { type: String, default: "" }, // For files
-    children: [this], // For folders (recursive)
+    children: [mongoose.Schema.Types.Mixed], // Avoid recursion errors
   },
   { _id: false }
 );
@@ -15,7 +15,7 @@ const ProjectSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
     users: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
-    code: { type: String, default: "" }, // fallback
+    code: { type: String, default: "" },
     files: [FileSchema],
     activeUsers: [
       {

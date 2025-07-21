@@ -29,9 +29,17 @@ const ChatSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
+
+  // NEW: Read Receipts
+  readBy: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    }
+  ],
 });
 
-// Optional Index for faster querying by project and time
+// Index for performance (fetch chat by project & sort by time)
 ChatSchema.index({ projectId: 1, timestamp: 1 });
 
 module.exports = mongoose.model("Chat", ChatSchema);
